@@ -1,0 +1,32 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getUserIdFromRequest } from '@/lib/getUserFromRequest';
+import { registerDeviceTokenForUser } from '@/lib/pushNotifications';
+
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic';
+
+// POST /api/push-notifications/register - Register device token for push notifications
+export async function POST(req: NextRequest) {
+  try {
+    const userId = await getUserIdFromRequest(req);
+    if (!userId) {
+      console.error('POST /api/push-notifications/register: No userId (unauthorized)');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { deviceToken } = await req.json();
+    
+    if (!deviceToken) {
+      return NextResponse.json({ error: 'Device token is required' }, { status: 400 });
+    }
+
+    await registerDeviceTokenForUser(userId, deviceToken);
+
+    console.log(`✅ Device token registered for user ${userId}`);
+    
+    return NextResponse.json({ success: true, message: 'Device token registered successfully' });
+  } catch (error) {
+    console.error('Error in POST /api/push-notifications/register:', error);
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+} 

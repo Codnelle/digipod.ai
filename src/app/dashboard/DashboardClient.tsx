@@ -1,14 +1,13 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { PlusIcon, FolderIcon, EllipsisVerticalIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
-import PipAvatar from '@/components/PipAvatar';
+import { FolderIcon, EllipsisVerticalIcon, ChevronDownIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import AntiHustleMeter from '@/components/AntiHustleMeter';
 import useSWR from 'swr';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { SparklesIcon, CalendarDaysIcon, EnvelopeOpenIcon } from '@heroicons/react/24/solid';
+import { CalendarDaysIcon, EnvelopeOpenIcon } from '@heroicons/react/24/solid';
 import './calendar-dashboard.css'; // Custom styles for react-big-calendar
 import { Calendar as BigCalendar, dateFnsLocalizer } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -16,6 +15,9 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 import { incrementMinutesSaved } from '../../lib/hustleMeter';
+import { SparklesIcon } from '@heroicons/react/24/solid';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas-pro';
 
 console.log('Firebase config (dashboard):', auth.app.options);
 
@@ -30,6 +32,12 @@ interface Project {
   phaseHistory?: { id: string; phase: string; timestamp: string | Date }[];
   clientMessages?: { id: string; body: string; from: string; createdAt: string | Date }[];
   phases?: string[]; // Added for edit functionality
+  status: string;
+  parentId?: string;
+  trigger?: string;
+  gmailId?: string; // Added for Gmail ID
+  currency?: string; // Added for currency
+  totalAmount?: number; // Added for total amount
 }
 
 interface DashboardEmail {
@@ -49,10 +57,61 @@ interface DashboardEmail {
   gmailId?: string; // Added for Gmail ID
 }
 
+interface CalendarEvent {
+  title: string;
+  date: string;
+  description?: string;
+  id?: string;
+  end?: string;
+}
+
+interface CalendarEventsApiResponse {
+  events?: CalendarEvent[];
+  error?: string;
+}
+
+interface Todo {
+  task: string;
+  dueDate?: string;
+  type: 'project' | 'calendar';
+  projectName?: string;
+  confidence?: number;
+  createdAt?: {
+    _seconds: number;
+    _nanoseconds: number;
+  };
+}
+
+interface TodosApiResponse {
+  todos?: Todo[];
+  error?: string;
+}
+
+interface AiDraftsApiResponse {
+  drafts?: DashboardEmail[];
+  error?: string;
+}
+
+interface SummaryMetrics {
+  phaseAdvances?: number;
+  newDrafts?: number;
+  newTodos?: number;
+  processedEmails?: number;
+  aiActivities?: number;
+  highImpactChanges?: number;
+}
+
+interface DashboardSummary {
+  summaryText?: string;
+  summary?: SummaryMetrics;
+  lastUpdated?: string;
+  error?: string;
+}
+
 const fetcher = async (url: string) => {
   const user = auth.currentUser;
   if (!user) return [];
-  const token = await user.getIdToken();
+  const token = await user.getIdToken(true);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) return [];
   const data = await res.json();
@@ -60,14 +119,14 @@ const fetcher = async (url: string) => {
   return data;
 };
 
-async function createProject(name: string, clientEmail: string) {
+async function createProject(name: string, clientEmail: string, clientName?: string) {
   const user = auth.currentUser;
   if (!user) return null;
   const token = await user.getIdToken();
   const res = await fetch('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name, clientEmail }),
+    body: JSON.stringify({ name, clientEmail, clientName }),
   });
   if (!res.ok) {
     // Optionally, show a toast or log the error
@@ -90,11 +149,15 @@ async function fetchGmailUser() {
 }
 
 // Helper to fetch with auth token
-async function fetchWithAuth(url: string): Promise<unknown> {
+async function fetchWithAuth<T>(url: string): Promise<T> {
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
-  const token = await user.getIdToken();
+  const token = await user.getIdToken(true);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ message: `Request failed with status ${res.status}` }));
+    throw new Error(errorData.message || 'Unknown error');
+  }
   return res.json();
 }
 
@@ -102,9 +165,9 @@ function ProjectCard({ project, onDelete, onEdit }: { project: Project, onDelete
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
   // Use the same date parsing logic as elsewhere
-  const getDateFromEmail = (dateVal: any): Date => {
-    if (dateVal && typeof dateVal === 'object' && typeof dateVal.toDate === 'function') {
-      return dateVal.toDate();
+  const getDateFromEmail = (dateVal: FirebaseFirestore.Timestamp | Date | string): Date => {
+    if (dateVal && typeof dateVal === 'object' && typeof (dateVal as { toDate?: unknown }).toDate === 'function') {
+      return (dateVal as { toDate: () => Date }).toDate();
     }
     if (dateVal instanceof Date) return dateVal;
     if (typeof dateVal === 'string') return new Date(dateVal);
@@ -137,6 +200,11 @@ function ProjectCard({ project, onDelete, onEdit }: { project: Project, onDelete
         <span className="font-semibold text-lg text-white group-hover:text-purple-200 transition-colors">{project.name}</span>
       </div>
       <div className="text-blue-100 mb-2 relative z-10">{project.clientEmail ? `Client: ${project.clientEmail}` : 'No client email set'}</div>
+      {project.totalAmount !== undefined && project.totalAmount !== null && (
+        <div className="text-blue-200 text-sm mt-2">
+          Payment: {project.currency ? `${project.currency} ` : ''}{project.totalAmount}
+        </div>
+      )}
       <div className="flex flex-col gap-2 relative z-10">
         <span className="text-xs text-blue-200">Created: {getDateFromEmail(project.createdAt).toLocaleString()}</span>
         <span className="text-xs text-blue-200">Phase: <span className="font-semibold text-blue-300">{project.currentPhase}</span></span>
@@ -151,7 +219,7 @@ function ProjectCard({ project, onDelete, onEdit }: { project: Project, onDelete
   );
 }
 
-function ExpandableCard({ expanded, onClick, title, icon, summary, content, loading, gradientClass }: {
+function ExpandableCard({ expanded, onClick, title, icon, summary, content, loading, gradientClass, isGmailConnected, onRefresh }: {
   expanded: boolean;
   onClick: () => void;
   title: React.ReactNode;
@@ -160,6 +228,8 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
   content: React.ReactNode;
   loading: boolean;
   gradientClass: string;
+  isGmailConnected: boolean;
+  onRefresh?: () => void;
 }) {
   return (
     <div
@@ -167,9 +237,9 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
       role="button"
       aria-label={`Expand ${title}`}
       className={
-        `${gradientClass} rounded-2xl shadow-xl p-8 flex flex-col backdrop-blur-md  card-bg  items-start min-h-[180px] border-1 h-full relative  transition-all duration-300 outline-none focus:ring-4 focus:ring-blue-400/50 hover:scale-[1.02] hover:shadow-2xl border-2 border-digi hover:border-blue-400 ${expanded ? 'ring-2 ring-blue-300/30 border-blue-400' : ''} ${loading ? 'animate-pulse' : ''}`
+        `${gradientClass} rounded-2xl shadow-xl p-8 flex flex-col backdrop-blur-md card-bg items-start ${expanded ? 'h-auto min-h-0' : 'min-h-[180px] h-full'} border-1 relative transition-all duration-300 outline-none focus:ring-4 focus:ring-blue-400/50 hover:scale-[1.02] hover:shadow-2xl border-2 border-digi hover:border-blue-400 ${expanded ? 'ring-2 ring-blue-300/30 border-blue-400' : ''} ${loading ? 'animate-pulse' : ''}`
       }
-      style={{ minHeight: 180, height: '100%', cursor: 'pointer' }}
+      style={{ cursor: 'pointer' }}
       onClick={onClick}
       onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && onClick()}
     >
@@ -187,12 +257,30 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
         {icon}
         <div className="flex w-full items-center">
         <h2 className="text-2xl font-extrabold text-white ml-2 flex-1 drop-shadow-lg tracking-tight">{title}</h2>
+        <div className="flex items-center gap-2">
+          {onRefresh && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefresh();
+              }}
+              className="p-1 rounded-full hover:bg-blue-600/30 transition-colors duration-200"
+              title="Refresh data"
+            >
+              <ArrowPathIcon className={`h-5 w-5 text-blue-200 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          )}
         <ChevronDownIcon
           className={`h-6 w-6 text-blue-100 ml-2 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
         />
         </div>
+        </div>
       </div>
-      {loading ? (
+      {!isGmailConnected ? (
+        <div className="w-full flex flex-col items-center justify-center">
+            <p className="text-white text-lg mb-4">Please connect your Gmail account to use this feature.</p>
+        </div>
+      ) : loading ? (
         <div className="w-full space-y-3">
           {/* Skeleton loading for summary */}
           <div className="space-y-2">
@@ -208,29 +296,28 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
         </div>
       ) : (
         <>
-          <div className={`transition-all duration-300 ${expanded ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 h-auto'}`}>{summary}</div>
-          <div
-            className={`transition-all duration-500 ease-in-out ${expanded ? 'opacity-100 max-h-[320px] mt-2' : 'opacity-0 max-h-0 pointer-events-none'} w-full`}
-            style={{ overflowY: expanded ? 'auto' : 'hidden' }}
-          >
-            {content}
-          </div>
+          <div className="w-full">{summary}</div>
+          <div className={`w-full mt-2 ${expanded ? '' : 'max-h-[260px] overflow-y-auto'}`}>{content}</div>
         </>
       )}
-      <span className="absolute top-4 right-4 text-xs text-blue-100 bg-blue-900/80 px-2 py-1 rounded-lg shadow-md select-none">{expanded ? 'Click to collapse' : 'Click to expand'}</span>
     </div>
   );
 }
 
 
+const fetchTodosWithAuth = async (url: string) => {
+  // Wait for Firebase Auth to be ready and user to be logged in
+  if (!auth.currentUser) return [];
+  const token = await auth.currentUser.getIdToken(true);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.todos || [];
+};
 
-export default function DashboardClient({ summary }: { summary?: unknown }) {
-  const [name, setName] = useState('');
-  const [clientEmail, setClientEmail] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function DashboardClient() {
   const [toast, setToast] = useState<string | null>(null);
   const [minutesSaved, setMinutesSaved] = useState(0);
-  const [focusMode, setFocusMode] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [, forceRerender] = useState(0);
@@ -241,14 +328,14 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
   const [editError, setEditError] = useState<string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const shouldFetchProjects = authReady && !!auth.currentUser;
-  const { data: projectsData = [], mutate } = useSWR(
+  const { data: projectsData = [], mutate: mutateProjects } = useSWR(
     shouldFetchProjects ? '/api/projects' : null,
     fetcher,
     { revalidateOnFocus: false }
   );
 
   // AI drafts state
-  const [aiDraftsData, setAiDraftsData] = useState<{ drafts: any[] }>({ drafts: [] });
+  const [aiDraftsData, setAiDraftsData] = useState<{ drafts: DashboardEmail[] }>({ drafts: [] });
   const [loadingDrafts, setLoadingDrafts] = useState(false);
 
   // New state for AI-powered dashboard sections
@@ -258,6 +345,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
   // Add state for expanded cards
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   // Add state for Gmail connection
+  const [isGmailConnected, setIsGmailConnected] = useState(false);
   const [selectedDateEvents, setSelectedDateEvents] = useState<{ date: Date; events: { title: string; start: Date; end: Date }[] } | null>(null);
   // Calendar state (must be at top level)
   const [calendarEvents, setCalendarEvents] = useState<{ title: string; date: string }[]>([]);
@@ -267,12 +355,40 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
   const [todos, setTodos] = useState<{ task: string; dueDate?: string; type: 'project' | 'calendar'; projectName?: string; confidence?: number }[]>([]);
 
   // AI Drafts state
-  const [selectedDraft, setSelectedDraft] = useState<any>(null);
-  const [editableDraft, setEditableDraft] = useState<any>(null);
-  const [clientMessages, setClientMessages] = useState<any[]>([]);
-  const [parentEmail, setParentEmail] = useState<any>(null);
+  const [selectedDraft, setSelectedDraft] = useState<DashboardEmail | null>(null);
+  const [editableDraft, setEditableDraft] = useState<DashboardEmail | null>(null);
+  const [clientMessages, setClientMessages] = useState<DashboardEmail[]>([]);
+  const [parentEmail, setParentEmail] = useState<DashboardEmail | null>(null);
   const [aiSummary, setAiSummary] = useState<string>('');
-  const [summaryData, setSummaryData] = useState<any>(null);
+  const [summaryData, setSummaryData] = useState<{
+    summary?: {
+      phaseAdvances?: number;
+      newDrafts?: number;
+      newTodos?: number;
+      processedEmails?: number;
+      aiActivities?: number;
+      highImpactChanges?: number;
+    };
+    lastUpdated?: string;
+  } | null>(null);
+
+  // Modal state for creating a new project
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientEmail, setNewClientEmail] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  // Add state for currency
+  const [editCurrency, setEditCurrency] = useState(editProject?.currency || 'INR');
+
+  const shouldFetchTodos = authReady && !!auth.currentUser;
+  const { mutate: mutateTodos } = useSWR(
+    shouldFetchTodos ? '/api/client-todos' : null,
+    fetchTodosWithAuth,
+    { revalidateOnFocus: false }
+  );
 
   // Helper to toggle card expansion
   const handleCardToggle = (card: string) => {
@@ -307,7 +423,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
   };
 
   // Helper function to open draft modal
-  const openDraftModal = (draft: any) => {
+  const openDraftModal = (draft: DashboardEmail) => {
     setSelectedDraft(draft);
     setEditableDraft({ ...draft });
   };
@@ -331,8 +447,11 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         setAuthChecking(false);
         // No need to fetchProjects here, SWR will handle it
         fetchGmailUser().then((user: { email?: string, gmailConnected?: boolean } | null) => {
-          if (user && user.email && user.gmailConnected) {
-            setToast(`Gmail connected: ${user.email}`);
+          if (user) {
+            setIsGmailConnected(user.gmailConnected || false);
+            if (user.email && user.gmailConnected) {
+              setToast(`Gmail connected: ${user.email}`);
+            }
           }
         });
       }
@@ -344,7 +463,6 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
     const handleStorage = () => {
       const saved = parseInt(localStorage.getItem('digipod-minutes-saved') || '0', 10);
       setMinutesSaved(saved);
-      setFocusMode(localStorage.getItem('digipod-focus-mode') === 'on');
     };
     // Set initial value on mount
     handleStorage();
@@ -366,28 +484,123 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
     return () => window.removeEventListener('digipod-theme-change', handler);
   }, []);
 
+
+
+  // Refresh functions for each card
+  const refreshSummary = async () => {
+    console.log('🔄 Refreshing summary data...');
+    setLoadingSummary(true);
+    try {
+      const summaryData = await fetchWithAuth<DashboardSummary>('/api/dashboard/summary');
+      setAiSummary(summaryData.summaryText || 'No AI changes detected.');
+      setSummaryData(summaryData);
+    } catch (error) {
+      console.error('Error refreshing summary:', error);
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
+
+  const refreshTodos = async () => {
+    console.log('🔄 Refreshing todos data...');
+    setLoadingTodos(true);
+    try {
+      // Re-fetch todos data directly
+      const todosData = await fetchTodosWithAuth('/api/client-todos');
+      console.log('🔍 Refreshed todosData:', todosData);
+      
+      // Process the data the same way as in the useEffect
+      const todosRaw: Todo[] = Array.isArray(todosData) ? todosData : [];
+      
+      // Sort todos by creation date (most recent first)
+      todosRaw.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt._seconds * 1000) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt._seconds * 1000) : new Date(0);
+        return dateB.getTime() - dateA.getTime(); // Most recent first
+      });
+      
+      console.log('🔍 Refreshed and sorted todosRaw:', todosRaw);
+      
+      // Combine with calendar events (re-fetch calendar data too)
+      const calendarData = await fetchWithAuth<CalendarEventsApiResponse>('/api/calendar-events');
+      const calendarEventsRaw = calendarData.events || [];
+      
+      const calendarTodos = calendarEventsRaw
+        .filter(ev => {
+          const text = (ev.title + ' ' + (ev.description || '')).toLowerCase();
+          return /call|meeting|zoom|meet/.test(text);
+        })
+        .map(ev => ({
+          task: ev.title,
+          dueDate: ev.date,
+          type: 'calendar' as const,
+        }));
+
+      // Combine all tasks: backend todos, calendar events, and draft tasks
+      setTodos([...todosRaw, ...calendarTodos]);
+      
+    } catch (error) {
+      console.error('Error refreshing todos:', error);
+    } finally {
+      setLoadingTodos(false);
+    }
+  };
+
+  const refreshDrafts = async () => {
+    console.log('🔄 Refreshing drafts data...');
+    setLoadingDrafts(true);
+    try {
+      const draftsData = await fetchWithAuth<AiDraftsApiResponse>('/api/ai-drafts?status=draft&limit=10');
+      setAiDraftsData({ drafts: draftsData.drafts || [] });
+    } catch (error) {
+      console.error('Error refreshing drafts:', error);
+    } finally {
+      setLoadingDrafts(false);
+    }
+  };
+
+  // Listen for todo-added events to refresh todos data
+  useEffect(() => {
+    const handleTodoAdded = () => {
+      console.log('🔄 Todo added event received, refreshing todos...');
+      mutateTodos(); // Refresh the todos data
+    };
+    
+    const handleSummaryRefresh = () => {
+      console.log('🔄 Summary refresh event received, refreshing summary...');
+      refreshSummary(); // Now we can use refreshSummary since it's defined above
+    };
+    
+    window.addEventListener('todo-added', handleTodoAdded);
+    window.addEventListener('summary-refresh', handleSummaryRefresh);
+    return () => {
+      window.removeEventListener('todo-added', handleTodoAdded);
+      window.removeEventListener('summary-refresh', handleSummaryRefresh);
+    };
+  }, [mutateTodos, refreshSummary]);
+
   useEffect(() => {
     if (!authReady) return;
     setLoadingSummary(true); setLoadingCalendar(true); setLoadingTodos(true); setLoadingDrafts(true);
     // Fetch actionable to-dos, AI drafts, and AI changes summary from backend
     console.log('Starting API calls for dashboard data...');
     Promise.all([
-      fetchWithAuth('/api/calendar-events').catch((err) => { console.log('Calendar API error:', err); return err; }),
-      fetchWithAuth('/api/client-todos').catch((err) => { console.log('Todos API error:', err); return err; }),
-      fetchWithAuth('/api/ai-drafts?status=draft&limit=10').catch((err) => { console.log('AI drafts API error:', err); return err; }),
-      fetchWithAuth('/api/dashboard/summary').catch((err) => { console.log('Dashboard summary API error:', err); return err; })
+      fetchWithAuth<CalendarEventsApiResponse>('/api/calendar-events').catch((err): CalendarEventsApiResponse => { console.log('Calendar API error:', err); return { error: (err as Error).message || 'Failed to load calendar events', events: [] }; }),
+      fetchTodosWithAuth('/api/client-todos').catch((err): TodosApiResponse => { console.log('Todos API error:', err); return { error: (err as Error).message || 'Failed to load to-dos', todos: [] }; }),
+      fetchWithAuth<AiDraftsApiResponse>('/api/ai-drafts?status=draft&limit=10').catch((err): AiDraftsApiResponse => { console.log('AI drafts API error:', err); return { error: (err as Error).message || 'Failed to load AI drafts', drafts: [] }; }),
+      fetchWithAuth<DashboardSummary>('/api/dashboard/summary').catch((err): DashboardSummary => { console.log('Dashboard summary API error:', err); return { error: (err as Error).message || 'Failed to load dashboard summary' }; })
     ]).then(([calendarData, todosData, aiDraftsData, summaryData]) => {
-      let calendarEventsRaw: { title: string; date: string; description?: string; id?: string; end?: string }[] = [];
-      let todosRaw: { task: string; dueDate?: string; type: 'project' | 'calendar'; projectName?: string; confidence?: number }[] = [];
+      let calendarEventsRaw: CalendarEvent[] = [];
+      let todosRaw: Todo[] = [];
 
-      if (calendarData && typeof calendarData === 'object' && 'error' in calendarData) {
-        if (calendarData.error === 'Unauthorized') {
+      if (calendarData.error) {
+        if (calendarData.error.includes('Unauthorized')) {
           setCalendarError('You are not logged in or your session expired. Please log in and reconnect Google.');
           setToast('Google Calendar: Not authorized. Please log in and reconnect.');
-        } else if (calendarData.error === 'No Google token') {
+        } else if (calendarData.error.includes('No Google token')) {
           setCalendarError('Google account not connected. Please reconnect Google.');
           setToast('Google Calendar: Not connected. Please reconnect.');
-        } else if (calendarData.error === 'Google Calendar API error') {
+        } else if (calendarData.error.includes('Google Calendar API error')) {
           setCalendarError('Google Calendar API error. Try reconnecting Google.');
           setToast('Google Calendar: API error. Try reconnecting.');
         } else {
@@ -397,7 +610,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         setCalendarEvents([]);
         setLoadingCalendar(false);
       } else {
-        calendarEventsRaw = (calendarData as { events?: { title: string; date: string; description?: string; id?: string; end?: string }[] }).events || [];
+        calendarEventsRaw = calendarData.events || [];
         setCalendarEvents(calendarEventsRaw);
         setCalendarError(null);
         setLoadingCalendar(false);
@@ -425,21 +638,20 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         }
       }
 
-      if (todosData && typeof todosData === 'object' && 'error' in todosData) {
-        if (todosData.error === 'Unauthorized') {
-          setToast('To-Do list: Not authorized. Please log in.');
-        } else if (todosData.error === 'No Google token') {
-          setToast('To-Do list: Not connected. Please reconnect Google.');
-        } else if (todosData.error === 'Google Calendar API error') {
-          setToast('To-Do list: API error. Try reconnecting.');
-        } else {
-          todosRaw = (todosData as { todos?: { task: string; dueDate?: string; type: 'project' | 'calendar'; projectName?: string; confidence?: number }[] }).todos || [];
-        }
+      // todosData is already the array of todos from fetchTodosWithAuth
+      console.log('🔍 Processing todosData:', todosData);
+      todosRaw = Array.isArray(todosData) ? todosData : [];
+      console.log('🔍 Processed todosRaw:', todosRaw);
+      
+      // Sort todos by creation date (most recent first)
+      todosRaw.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt._seconds * 1000) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt._seconds * 1000) : new Date(0);
+        return dateB.getTime() - dateA.getTime(); // Most recent first
+      });
+      
+      console.log('🔍 Sorted todosRaw:', todosRaw);
         setLoadingTodos(false);
-      } else {
-        todosRaw = (todosData as { todos?: { task: string; dueDate?: string; type: 'project' | 'calendar'; projectName?: string; confidence?: number }[] }).todos || [];
-        setLoadingTodos(false);
-      }
 
       // Combine project/client todos and calendar events
       const calendarTodos = calendarEventsRaw
@@ -454,23 +666,23 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         }));
 
       // Process AI drafts data
-      if (aiDraftsData && typeof aiDraftsData === 'object' && 'error' in aiDraftsData) {
+      if (aiDraftsData.error) {
         setAiDraftsData({ drafts: [] });
         setLoadingDrafts(false);
       } else {
-        const draftsData = aiDraftsData as { drafts?: any[] } || { drafts: [] };
+        const draftsData = aiDraftsData || { drafts: [] };
         setAiDraftsData({ drafts: draftsData.drafts || [] });
         setLoadingDrafts(false);
       }
 
       // Process AI changes summary data
       console.log('Processing summary data:', summaryData);
-      if (summaryData && typeof summaryData === 'object' && 'error' in summaryData) {
+      if (summaryData.error) {
         console.log('Summary data has error:', summaryData.error);
         setAiSummary("Unable to load AI changes summary.");
         setLoadingSummary(false);
       } else {
-        const summaryInfo = summaryData as { summaryText?: string } || {};
+        const summaryInfo = summaryData || {};
         console.log('Summary info:', summaryInfo);
         setAiSummary(summaryInfo.summaryText || "No AI changes detected.");
         setSummaryData(summaryInfo);
@@ -478,11 +690,11 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
       }
 
       // Extract tasks from AI drafts
-      const draftTasks = (aiDraftsData as any)?.drafts?.filter((draft: any) => draft.status === 'draft')
-        .map((draft: any) => ({
+      const draftTasks = aiDraftsData.drafts?.filter((draft: DashboardEmail) => draft.status === 'draft')
+        .map((draft: DashboardEmail) => ({
           task: `Review AI draft: ${draft.subject || 'AI Draft'}`,
           type: 'project' as const,
-          projectName: draft.clientEmail || 'Client',
+          projectName: draft.projectName || 'Client',
           confidence: 0.7
         })) || [];
       
@@ -509,29 +721,16 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
+      setIsGmailConnected(false);
       return;
     }
+    const data = await res.json();
+    setIsGmailConnected(data.gmailConnected || false);
   };
 
   useEffect(() => {
     checkGmailConnection();
   }, [authReady]);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    const project = await createProject(name, clientEmail);
-    if (project && project.id) {
-      mutate();
-      setName('');
-      setClientEmail('');
-      setToast(`Project "${project.name}" created!`);
-    } else {
-      setToast('Failed to create project. Please try again.');
-    }
-    setLoading(false);
-    setTimeout(() => setToast(null), 2500);
-  };
 
   const handleDelete = async (projectId: string) => {
     // Add confirmation step
@@ -549,7 +748,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (res.ok) {
-      mutate();
+      mutateProjects();
       setToast(`Project "${project.name}" deleted successfully.`);
     } else {
       const errorData = await res.json().catch(() => ({}));
@@ -564,6 +763,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
     setEditProject(project);
     setEditPhases(project.phases && project.phases.length > 0 ? project.phases : ['DISCOVERY', 'DESIGN', 'REVISIONS', 'DELIVERY']);
     setEditName(project.name);
+    setEditCurrency(project.currency || 'INR');
     setEditError(null);
   };
 
@@ -585,11 +785,11 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
     const res = await fetch(`/api/projects/${editProject.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ phases: editPhases, name: editName }),
+      body: JSON.stringify({ phases: editPhases, name: editName, currency: editCurrency }),
     });
     setEditLoading(false);
     if (res.ok) {
-      mutate();
+      mutateProjects();
       setEditProject(null);
     } else {
       setEditError('Failed to update project.');
@@ -638,6 +838,8 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
       setToast('Failed to decline draft.');
     }
   };
+
+
 
   // 2. Fetch client messages and parent email when modal opens
   useEffect(() => {
@@ -711,6 +913,18 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
     fetchParentEmail();
   }, [selectedDraft]);
 
+  // Onboarding redirect logic
+  React.useEffect(() => {
+    // Only run on client
+    if (typeof window !== 'undefined') {
+      const onboardingComplete = localStorage.getItem('digipod-onboarding-complete');
+      // Check for Gmail connection (window.gmailConnected is set by sidebar)
+      if (window.gmailConnected && !onboardingComplete) {
+        router.push('/onboarding');
+      }
+    }
+  }, []);
+
   if (authChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -732,8 +946,107 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
     getDay,
     locales,
   });
+const generatePdfFromHtml = async () => {
+  const input = document.getElementById('pdf-content');
+  if (!input) {
+    console.error("Element with id 'pdf-content' not found.");
+    return;
+  }
+
+  const canvas = await html2canvas(input);
+  const imgData = canvas.toDataURL('image/png');
+
+  const pdf = new jsPDF();
+
+  const imgProps = pdf.getImageProperties(imgData);
+  const pdfWidth = pdf.internal.pageSize.getWidth();
+  const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+  pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+  pdf.save('report.pdf');
+};
 
   return (
+    <>
+      <div id="pdf-content" className='absolute px-2 top-[-9999px] left-[-9999px] w-[816px] h-[1056px] text-black'>
+        this is something!
+        {aiDraftsData.drafts?.map((draft: DashboardEmail) => (
+                      <li key={draft.id} className="bg-white/10 rounded-lg p-4 border border-blue-200/10 hover:border-blue-300/20 transition-all">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="font-semibold text-blue-100 truncate">{draft.subject || 'AI Draft'}</span>
+                              <span className="px-2 py-0.5 text-xs rounded bg-blue-700/60 text-blue-200 font-semibold">
+                                {draft.projectName || 'Client'}
+                              </span>
+                            </div>
+                            
+                            {/* Clickable preview - shows first 100 chars */}
+                            <div 
+                              className="text-sm text-blue-200 mb-3 cursor-pointer hover:text-blue-100 transition-colors"
+                              onClick={() => {
+                                // Show full content in modal
+                                openDraftModal(draft);
+                              }}
+                            >
+                              {draft.body && draft.body.length > 100 
+                                ? `${draft.body.substring(0, 100)}...` 
+                                : draft.body || 'AI generated draft content'
+                              }
+                              <span className="text-blue-400 text-xs ml-2">(Click to view full)</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 text-xs text-blue-300">
+                              <span>To: {draft.projectName || 'Client'}</span>
+                              <span>•</span>
+                              <span>Status: {draft.status}</span>
+                              <span>•</span>
+                              <span>
+                                {getDateFromEmail(draft.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-col gap-2 min-w-[120px] items-end">
+                            {draft.status === 'draft' && (
+                              <>
+                                <button
+                                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg font-semibold text-xs shadow-sm transition-all"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await handleApproveDraft(draft);
+                                    // incrementMinutesSaved is already called in handleApproveDraft
+                                  }}
+                                >
+                                  Approve & Send
+                                </button>
+                                <button
+                                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg font-semibold text-xs shadow-sm transition-all"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    // TODO: Implement decline functionality
+                                    console.log('Decline draft:', draft.id);
+                                  }}
+                                >
+                                  Decline
+                                </button>
+                              </>
+                            )}
+                            {draft.status === 'approved' && (
+                              <span className="text-green-400 text-xs font-semibold px-2 py-1 bg-green-900/40 rounded">
+                                Sent ✓
+                              </span>
+                            )}
+                            {draft.status === 'declined' && (
+                              <span className="text-red-400 text-xs font-semibold px-2 py-1 bg-red-900/40 rounded">
+                                Declined ✗
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+      </div>    
     <main className="flex-1 flex flex-col min-h-screen bg-gradient-to-r from-gray-900 to-gray-900 relative overflow-x-hidden">
       {/* Animated shimmer overlay */}
       <div className="pointer-events-none fixed inset-0 z-0 animate-shimmer bg-gradient-to-r from-transparent via-white/10" style={{ backgroundSize: '200% 100%' }} />
@@ -747,9 +1060,9 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
             </div>
             <div className="flex-1 flex justify-center items-center">
               {/* Floating Pip Avatar */}
-              <div className="animate-float drop-shadow-xl">
+              {/* <div className="animate-float drop-shadow-xl">
                 <PipAvatar minutesSaved={minutesSaved} focusMode={focusMode} />
-              </div>
+              </div> */}
             </div>
             <div className="flex-1 flex justify-end items-center gap-4">
               <AntiHustleMeter minutesSaved={minutesSaved} />
@@ -777,6 +1090,22 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
           </div>
         </div>
       </section>
+
+      {/* Create a New Project Button - inside dashboard, above cards */}
+      <div className="w-full flex justify-end px-20 mb-4">
+        <button
+          onClick={generatePdfFromHtml}
+          className="px-5 py-2 bg-blue-700 mr-2 text-white font-bold rounded-xl hover:scale-105 transition flex items-center gap-2"
+        >
+          <span className="text-lg">+</span> Download Analytics
+        </button>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="px-5 py-2 bg-white text-black font-bold rounded-xl hover:scale-105 transition flex items-center gap-2"
+        >
+          <span className="text-lg">+</span> Create a New Project
+        </button>
+      </div>
       {/* Toast notification */}
       {toast && (
         <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in">
@@ -784,83 +1113,84 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         </div>
       )}
       {/* AI-powered Overview Cards */}
-      {/* What's Changed Card - Top with Calendar Icon */}
-      <div className="w-full max-w-3xl mx-auto px-6 mb-8 relative ">
-        <ExpandableCard
-          expanded={expandedCard === 'summary'}
-          onClick={() => handleCardToggle('summary')}
-          title="What's Changed"
-          icon={<SparklesIcon className="h-8 w-8 text-yellow-300" />}
-          summary={
-            loadingSummary ? (
-              <div className="space-y-2 w-full">
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '90%' }}></div>
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '75%' }}></div>
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '60%' }}></div>
-              </div>
-            ) : (
-              <p className="text-blue-100 text-base truncate w-full">{aiSummary || 'No AI changes detected.'}</p>
-            )
-          }
-          content={
-            loadingSummary ? (
-              <div className="space-y-3 w-full">
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse"></div>
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '95%' }}></div>
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '80%' }}></div>
-                <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '70%' }}></div>
-              </div>
-            ) : (
-              <div className="text-blue-100 text-base mt-2 " >
-                <p className="mb-4">{aiSummary || 'No AI changes detected.'}</p>
-                {summaryData && typeof summaryData === 'object' && 'summary' in summaryData && (
-                  <div className="bg-blue-900/20 rounded-lg p-4 space-y-2">
-                    <h4 className="font-semibold text-blue-200 mb-3">AI Activity Breakdown (Last 24h):</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="flex justify-between">
-                        <span>🚀 Phase Advances:</span>
-                        <span className="font-semibold text-green-400">{(summaryData as any).summary?.phaseAdvances || 0}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>📝 New AI Drafts:</span>
-                        <span className="font-semibold text-blue-400">{(summaryData as any).summary?.newDrafts || 0}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>✅ New Todos:</span>
-                        <span className="font-semibold text-yellow-400">{(summaryData as any).summary?.newTodos || 0}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>📧 Processed Emails:</span>
-                        <span className="font-semibold text-purple-400">{(summaryData as any).summary?.processedEmails || 0}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>🤖 AI Activities:</span>
-                        <span className="font-semibold text-cyan-400">{(summaryData as any).summary?.aiActivities || 0}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>⚡ High Impact:</span>
-                        <span className="font-semibold text-red-400">{(summaryData as any).summary?.highImpactChanges || 0}</span>
-                      </div>
-                    </div>
-                    <div className="text-xs text-blue-300 mt-3 pt-3 border-t border-blue-700">
-                      Last updated: {summaryData && typeof summaryData === 'object' && 'lastUpdated' in summaryData 
-                        ? new Date((summaryData as any).lastUpdated).toLocaleString() 
-                        : 'Unknown'}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          }
-          loading={loadingSummary}
-          gradientClass="bg-gradient-to-b from-cyan-800 to-fuchsia-800"
-        />
-      </div>
+      
       {/* Second row: To-Dos, Create Project, Drafted Replies */}
-      <div className="px-4 md:px-12">
-        <div className="flex flex-col items-center justify-center gap-8 md:flex-row md:flex-nowrap md:items-start md:justify-center md:gap-8 mb-12">
-          {/* To-Dos Card */}
-          <div className="flex-1 max-w-sm flex flex-col justify-between  rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-bl from-cyan-800 to-fuchsia-800">
+      <div id="create-project-section" className="px-4 md:px-12">
+        <div className="flex flex-col md:flex-row items-stretch justify-center gap-8 mb-12">
+          {/* What's Changed Card - moved from top, with full breakdown */}
+          <div className={`flex-1 max-w-xl flex flex-col justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-b from-cyan-800 to-fuchsia-800 min-h-[220px] ${expandedCard === 'summary' ? 'h-auto' : 'h-[260px]'}`}>
+            <ExpandableCard
+              expanded={expandedCard === 'summary'}
+              onClick={() => handleCardToggle('summary')}
+              title="What's Changed"
+              icon={<SparklesIcon className="h-8 w-8 text-yellow-300" />}
+              onRefresh={refreshSummary}
+              summary={
+                loadingSummary ? (
+                  <div className="space-y-2 w-full">
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '90%' }}></div>
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '75%' }}></div>
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '60%' }}></div>
+                  </div>
+                ) : (
+                  <p className="text-blue-100 text-base truncate w-full">{aiSummary || 'No AI changes detected.'}</p>
+                )
+              }
+              content={
+                loadingSummary ? (
+                  <div className="space-y-3 w-full">
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse"></div>
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '95%' }}></div>
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '80%' }}></div>
+                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '70%' }}></div>
+                  </div>
+                ) : (
+                  <div className="text-blue-100 text-base mt-2 ">
+                    <p className="mb-4 w-full">{aiSummary || 'No AI changes detected.'}</p>
+                    {summaryData && typeof summaryData === 'object' && 'summary' in summaryData && (
+                      <div className="bg-blue-900/20 rounded-lg p-4 space-y-2">
+                        <h4 className="font-semibold text-blue-200 mb-3">AI Activity Breakdown (Last 24h):</h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="flex justify-between">
+                            <span>🚀 Phase Advances:</span>
+                            <span className="font-semibold text-green-400">{summaryData.summary?.phaseAdvances || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>📝 New AI Drafts:</span>
+                            <span className="font-semibold text-blue-400">{summaryData.summary?.newDrafts || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>✅ New Todos:</span>
+                            <span className="font-semibold text-yellow-400">{summaryData.summary?.newTodos || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>📧 Processed Emails:</span>
+                            <span className="font-semibold text-purple-400">{summaryData.summary?.processedEmails || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>🤖 AI Activities:</span>
+                            <span className="font-semibold text-cyan-400">{summaryData.summary?.aiActivities || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>⚡ High Impact:</span>
+                            <span className="font-semibold text-red-400">{summaryData.summary?.highImpactChanges || 0}</span>
+                          </div>
+                        </div>
+                        <div className="text-xs text-green-500 mt-3 pt-2 border-t border-green-200">
+                          Last updated: {summaryData?.lastUpdated ? new Date(summaryData.lastUpdated).toLocaleString() : 'Unknown'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+              loading={loadingSummary}
+              gradientClass="bg-gradient-to-b from-cyan-800 to-fuchsia-800"
+              isGmailConnected={isGmailConnected}
+            />
+          </div>
+          {/* Upcoming To-Dos Card */}
+          <div className={`flex-1 max-w-xl w-full min-w-[320px] flex flex-col justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-b from-cyan-800 to-fuchsia-800 min-h-[260px] ${expandedCard === 'todos' ? 'h-auto' : 'h-[260px]'}`}>
             <ExpandableCard
               expanded={expandedCard === 'todos'}
               onClick={() => handleCardToggle('todos')}
@@ -871,6 +1201,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
                 </>
               }
               icon={<ClipboardDocumentCheckIcon className="h-8 w-8 mr-2 text-green-200 drop-shadow-lg" />}
+              onRefresh={refreshTodos}
               summary={
                 loadingTodos ? (
                   <div className="space-y-2 w-full">
@@ -992,47 +1323,22 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
               }
               loading={loadingTodos}
               gradientClass=""
+              isGmailConnected={isGmailConnected}
             />
           </div>
-          {/* Create New Project Widget */}
-          <div className="flex-[2] min-w-[400px] max-w-3xl min-h-[260px] flex flex-col justify-between">
-            <div className="bg-gray-800/80 rounded-2xl shadow-2xl p-10 border-1 border-digi backdrop-blur-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-blue-900/40 group cursor-pointer flex flex-col justify-between h-full">
-              <h2 className="text-2xl font-bold mb-2 flex items-center  gap-2 text-blue-200 group-hover:text-purple-200 transition-colors">
-                <span className="animate-pulse"><PlusIcon className="h-6 w-6" /></span> Create a New Project
-              </h2>
-              
-              <p className="text-gray-400 mb-6">Start a new project for a client. You can set the client email later.</p>
-              <form onSubmit={handleCreate}  className="flex flex-col sm:flex-row gap-3 items-center">
-                <input
-                  className="border px-4 py-3 rounded-lg w-full shadow-sm focus:ring-2 focus:outline-none bg-gray-900/70 border-gray-700 text-white placeholder-gray-400"
-                  placeholder="New project name"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  required
-                />
-                <button
-                  type="submit"
-                  className="transition bg-gradient-to-r from-blue-600 to-fuchsia-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 font-semibold shadow-lg disabled:opacity-50 min-w-[120px] justify-center bg-[#383f5eda] digi-btn border-1 border-digi hover:from-purple-500 hover:to-blue-600 focus:ring-2 focus:ring-blue-300 focus:outline-none active:scale-95"
-                  disabled={loading}
-                >
-                  <PlusIcon className="h-5 w-5" style={{ color: '#fff', transition: 'color 0.2s' }} />
-                  {loading ? 'Creating...' : 'Create'}
-                </button>
-              </form>
-            </div>
-          </div>
-          {/* Drafted Replies Card */}
-          <div className="flex-1 max-w-sm flex flex-col  justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-br from-cyan-800 to-fuchsia-800">
+          {/* AI Drafts Card */}
+          <div className={`flex-1 max-w-xl w-full min-w-[320px] flex flex-col justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-b from-cyan-800 to-fuchsia-800 min-h-[260px] ${expandedCard === 'drafts' ? 'h-auto' : 'h-[260px]'}`}>
             <ExpandableCard
               expanded={expandedCard === 'drafts'}
               onClick={() => handleCardToggle('drafts')}
               title={
                 <>
                   AI Drafts
-                  <div className="text-blue-200 text-xs font-normal mt-1">I saw some emails in your inbox from your client. I'm ready with the replies.</div>
+                  <div className="text-blue-200 text-xs font-normal mt-1">I saw some emails in your inbox from your client. I&apos;m ready with the replies.</div>
                 </>
               }
               icon={<EnvelopeOpenIcon className="h-8 w-8 mr-2 text-blue-200 drop-shadow-lg" />}
+              onRefresh={refreshDrafts}
               summary={
                 loadingDrafts ? (
                   <div className="space-y-2 w-full">
@@ -1089,7 +1395,8 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
                           } else {
                             setToast('Failed to get status');
                           }
-                        } catch (error) {
+                        } catch (err) {
+                          console.error('Failed to get status:', err);
                           setToast('Error getting status');
                         }
                       }}
@@ -1100,14 +1407,14 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
                   </div>
                 ) : (
                   <ul className="space-y-3 w-full max-h-60 overflow-y-auto">
-                    {aiDraftsData.drafts?.map((draft: any) => (
+                    {aiDraftsData.drafts?.map((draft: DashboardEmail) => (
                       <li key={draft.id} className="bg-white/10 rounded-lg p-4 border border-blue-200/10 hover:border-blue-300/20 transition-all">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
                               <span className="font-semibold text-blue-100 truncate">{draft.subject || 'AI Draft'}</span>
                               <span className="px-2 py-0.5 text-xs rounded bg-blue-700/60 text-blue-200 font-semibold">
-                                {draft.clientEmail || 'Client'}
+                                {draft.projectName || 'Client'}
                               </span>
                             </div>
                             
@@ -1119,20 +1426,20 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
                                 openDraftModal(draft);
                               }}
                             >
-                              {draft.content && draft.content.length > 100 
-                                ? `${draft.content.substring(0, 100)}...` 
-                                : draft.content || 'AI generated draft content'
+                              {draft.body && draft.body.length > 100 
+                                ? `${draft.body.substring(0, 100)}...` 
+                                : draft.body || 'AI generated draft content'
                               }
                               <span className="text-blue-400 text-xs ml-2">(Click to view full)</span>
                             </div>
                             
                             <div className="flex items-center gap-2 text-xs text-blue-300">
-                              <span>To: {draft.clientEmail || 'Client'}</span>
+                              <span>To: {draft.projectName || 'Client'}</span>
                               <span>•</span>
                               <span>Status: {draft.status}</span>
                               <span>•</span>
                               <span>
-                                {draft.createdAt ? new Date(draft.createdAt).toLocaleDateString() : 'Recent'}
+                                {getDateFromEmail(draft.createdAt).toLocaleDateString()}
                               </span>
                             </div>
                           </div>
@@ -1181,9 +1488,12 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
               }
               loading={loadingDrafts}
               gradientClass=""
+              isGmailConnected={isGmailConnected}
             />
           </div>
         </div>
+        {/* Create New Project Widget */}
+        
       </div>
       {/* Calendar Popup Modal */}
       {expandedCard === 'calendar' && (
@@ -1329,7 +1639,7 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         </div>
         {/* Projects Grid */}
         <div className={editProject ? 'transition-all duration-300 filter blur-md pointer-events-none select-none' : ''}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {Array.isArray(projectsData) && projectsData.map((project, idx) => (
               <ProjectCard
                 key={project.id || idx}
@@ -1369,6 +1679,25 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
                   maxLength={64}
                   required
                 />
+              </div>
+              <div className="mb-4">
+                <label className="block text-blue-100 mb-1">Payment Currency</label>
+                <select
+                  className="w-full border px-3 py-2 rounded bg-gray-800 text-white border-gray-700"
+                  value={editCurrency}
+                  onChange={e => setEditCurrency(e.target.value)}
+                  required
+                >
+                  <option value="INR">INR (₹)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="AUD">AUD (A$)</option>
+                  <option value="CAD">CAD (C$)</option>
+                  <option value="SGD">SGD (S$)</option>
+                  <option value="JPY">JPY (¥)</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
               <div className="mb-4">
                 <label className="block text-blue-100 mb-1">Phases</label>
@@ -1589,6 +1918,66 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         </div>
       )}
       
+      {/* Create Project Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-gray-900 rounded-xl p-8 w-full max-w-md border border-blue-900 shadow-xl relative">
+            <button onClick={() => setShowCreateModal(false)} className="absolute top-3 right-3 p-2 rounded-full hover:bg-gray-800">
+              <svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' strokeWidth={1.5} stroke='currentColor' className='h-6 w-6 text-gray-400'><path strokeLinecap='round' strokeLinejoin='round' d='M6 18L18 6M6 6l12 12' /></svg>
+            </button>
+            <h2 className="text-xl font-bold mb-4 text-blue-200">Create a New Project</h2>
+            <div className="flex flex-col gap-4">
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400"
+                placeholder="Project Name"
+                value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)}
+              />
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400"
+                placeholder="Client Name"
+                value={newClientName}
+                onChange={e => setNewClientName(e.target.value)}
+              />
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-400"
+                placeholder="Client Email"
+                value={newClientEmail}
+                onChange={e => setNewClientEmail(e.target.value)}
+                type="email"
+              />
+              {createError && <div className="text-red-400 text-sm">{createError}</div>}
+              <button
+                className="mt-4 px-5 py-3 text-center luminance luminance-bg text-white font-bold rounded-xl shadow-lg hover:scale-105 transition flex items-center gap-2 disabled:opacity-60"
+                disabled={createLoading || !newProjectName || !newClientName || !newClientEmail}
+                onClick={async () => {
+                  setCreateLoading(true);
+                  setCreateError('');
+                  try {
+                    const project = await createProject(newProjectName, newClientEmail, newClientName);
+                    if (project && project.id) {
+                      mutateProjects(); // Refresh project list
+                      setShowCreateModal(false);
+                      setNewProjectName('');
+                      setNewClientName('');
+                      setNewClientEmail('');
+                    } else {
+                      setCreateError('Failed to create project.');
+                    }
+                  } catch {
+                    setCreateError('Failed to create project.');
+                  } finally {
+                    setCreateLoading(false);
+                  }
+                }}
+              >
+                {createLoading ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <style jsx global>{`
         @keyframes shimmer {
           0% { background-position: -200% 0; }
@@ -1616,5 +2005,6 @@ export default function DashboardClient({ summary }: { summary?: unknown }) {
         }
       `}</style>
     </main>
+    </>
   );
 } 

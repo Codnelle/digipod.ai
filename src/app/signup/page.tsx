@@ -1,55 +1,53 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createUserWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, getDoc, updateDoc } from 'firebase/firestore';
-import { auth } from '@/lib/firebase';
+import { createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from '@/lib/firebase';
 import Image from 'next/image';
 
 export default function SignUpPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [signupCode, setSignupCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
+  const [name, setName] = useState('');
   const router = useRouter();
 
   // Check if user is already signed in
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        // User is already signed in, redirect to dashboard
-        router.push('/dashboard');
+        // User is already signed in, show sign out option
+        setAuthChecking(false);
       } else {
         // User is not signed in, show signup form
         setAuthChecking(false);
       }
     });
-
     return () => unsubscribe();
   }, [router]);
+
+
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      // 1. Check code in Firestore
-      const db = getFirestore();
-      const codeRef = doc(db, 'signupCodes', signupCode.trim().toUpperCase());
-      const codeSnap = await getDoc(codeRef);
-      if (!codeSnap.exists() || codeSnap.data().used) {
-        setError('Invalid or already used signup code.');
-        setLoading(false);
-        return;
-      }
-      // 2. Proceed with Firebase Auth signup
+      // Create user with Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      // 3. Mark code as used
-      await updateDoc(codeRef, { used: true, usedBy: user.uid, usedAt: new Date() });
-      // 4. Post to onboard collection for analytics
+      
+      // Save name to Firestore
+      await setDoc(doc(db, 'users', user.uid), {
+        name,
+        email: user.email,
+        createdAt: user.metadata.creationTime || new Date().toISOString(),
+      }, { merge: true });
+      
+      // Post to onboard collection for analytics
       await fetch('/api/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -79,6 +77,23 @@ export default function SignUpPage() {
     );
   }
 
+  // If user is signed in, show sign out button
+  if (auth.currentUser) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-xl shadow-lg flex flex-col items-center">
+          <p className="mb-4 text-gray-700 font-semibold">You are already signed in as <span className="text-blue-600">{auth.currentUser.email}</span>.</p>
+          <button
+            className="bg-blue-700 hover:bg-blue-800 text-white px-6 py-3 rounded-lg font-semibold shadow-sm transition"
+            onClick={async () => { await signOut(auth); router.refresh(); }}
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       <div className="bg-gray-900 shadow-xl rounded-xl p-8 w-full max-w-md border border-blue-900">
@@ -86,6 +101,14 @@ export default function SignUpPage() {
           <Image src="/digilogo.png" alt="Digipod Logo" width={120} height={40} />
         </div>
         <form onSubmit={handleSignUp} className="flex flex-col gap-4">
+          <input
+            type="text"
+            className="border px-4 py-3 rounded-lg w-full shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none bg-gray-800 text-white placeholder-gray-400 border-gray-700"
+            placeholder="Name"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            required
+          />
           <input
             type="email"
             className="border px-4 py-3 rounded-lg w-full shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none bg-gray-800 text-white placeholder-gray-400 border-gray-700"
@@ -101,16 +124,6 @@ export default function SignUpPage() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
-          />
-          <input
-            type="text"
-            className="border px-4 py-3 rounded-lg w-full shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none bg-gray-800 text-white placeholder-gray-400 border-gray-700"
-            placeholder="Signup Code"
-            value={signupCode}
-            onChange={e => setSignupCode(e.target.value)}
-            required
-            maxLength={16}
-            style={{ textTransform: 'uppercase', letterSpacing: 2 }}
           />
           {error && <div className="text-red-600 text-sm text-center">{error}</div>}
           <button
