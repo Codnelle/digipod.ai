@@ -1,26 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserIdFromRequest } from '@/lib/getUserFromRequest';
-import { emailMonitor } from '@/lib/backgroundService';
+import { emailMonitor } from '@/lib/emailMonitor';
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const userId = await getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(req);
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Initialize the email monitoring system
+    console.log(`[Email Monitor Init] Starting email monitoring for user ${userId}`);
+
+    // Start the email monitoring service
     await emailMonitor.startMonitoring();
+
+    // Also trigger an immediate check for this user
+    await emailMonitor.checkUserEmailsNow(userId);
 
     return NextResponse.json({ 
       success: true, 
-      message: 'Email monitoring system initialized',
-      isRunning: true
+      message: 'Email monitoring service started successfully',
+      timestamp: new Date().toISOString()
     });
+
   } catch (error) {
-    console.error('Error initializing email monitoring:', error);
+    console.error('Error starting email monitoring:', error);
     return NextResponse.json({ 
-      error: 'Failed to initialize email monitoring system' 
+      error: 'Failed to start email monitoring',
+      details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }

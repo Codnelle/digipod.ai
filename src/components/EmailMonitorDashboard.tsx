@@ -396,12 +396,82 @@ export default function EmailMonitorDashboard() {
             <div>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold text-gray-900">AI Drafts</h2>
+                <div className="flex gap-2">
                 <button
                   onClick={handleManualCheck}
                   className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
                 >
                   Check for New Emails
                 </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/ai-drafts?forceRefresh=true', {
+                          method: 'GET',
+                          headers: {
+                            'Authorization': `Bearer ${await currentUser?.getIdToken()}`
+                          }
+                        });
+                        if (response.ok) {
+                          mutateDrafts();
+                          console.log('Force refresh triggered successfully');
+                        }
+                      } catch (error) {
+                        console.error('Error triggering force refresh:', error);
+                      }
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+                    title="Force refresh AI drafts"
+                  >
+                    🔄 Refresh
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/ai-drafts', {
+                          method: 'POST',
+                          headers: {
+                            'Authorization': `Bearer ${await currentUser?.getIdToken()}`
+                          }
+                        });
+                        if (response.ok) {
+                          console.log('Manual email check triggered successfully');
+                          // Refresh drafts after a short delay
+                          setTimeout(() => mutateDrafts(), 2000);
+                        }
+                      } catch (error) {
+                        console.error('Error triggering manual email check:', error);
+                      }
+                    }}
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg"
+                    title="Manually check for new emails"
+                  >
+                    📧 Check Emails
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/debug/email-monitor', {
+                          headers: {
+                            'Authorization': `Bearer ${await currentUser?.getIdToken()}`
+                          }
+                        });
+                        if (response.ok) {
+                          const data = await response.json();
+                          console.log('Debug info:', data);
+                          alert(`Debug Info:\nProjects: ${data.debug.projects.count}\nAI Drafts: ${data.debug.aiDrafts.count}\nProcessed Emails: ${data.debug.processedEmails.count}\nEmail Settings: ${data.debug.emailSettings.count}`);
+                        }
+                      } catch (error) {
+                        console.error('Error getting debug info:', error);
+                        alert('Error getting debug info');
+                      }
+                    }}
+                    className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
+                    title="Get debug information"
+                  >
+                    🐛 Debug
+                  </button>
+                </div>
               </div>
 
               <div className="grid gap-4">
@@ -452,12 +522,37 @@ export default function EmailMonitorDashboard() {
             <div>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold text-gray-900">Processing Status</h2>
+                <div className="flex gap-2">
                 <button
                   onClick={handleManualCheck}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
                 >
                   Refresh Status
                 </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/ai-drafts', {
+                          method: 'POST',
+                          headers: {
+                            'Authorization': `Bearer ${await currentUser?.getIdToken()}`
+                          }
+                        });
+                        if (response.ok) {
+                          console.log('Manual email check triggered successfully');
+                          // Refresh status after a short delay
+                          setTimeout(() => mutateStatus(), 2000);
+                        }
+                      } catch (error) {
+                        console.error('Error triggering manual email check:', error);
+                      }
+                    }}
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
+                    title="Manually check for new emails"
+                  >
+                    📧 Check Emails
+                  </button>
+                </div>
               </div>
 
               <div className="grid gap-4">

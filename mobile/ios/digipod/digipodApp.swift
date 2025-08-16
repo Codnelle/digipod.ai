@@ -17,25 +17,24 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         #if DEBUG
         AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
         #else
-        AppCheck.setAppCheckProviderFactory(AppAttestProviderFactory())
+        AppCheck.setAppCheckProviderFactory(DeviceCheckProviderFactory())
         #endif
         FirebaseApp.configure()
         
         // Set Messaging delegate to receive FCM token refreshes
         Messaging.messaging().delegate = self
         
-        // Assign notification center delegate to show notifications in foreground
-        UNUserNotificationCenter.current().delegate = self
+        // Request comprehensive notification permissions
+        PushNotificationService.shared.requestPermission()
         
-        // Register for remote notifications
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if granted {
-                DispatchQueue.main.async {
-                    UIApplication.shared.registerForRemoteNotifications()
-                }
-            }
-            if let error = error { print("❌ Notification permission error: \(error)") }
+        // Check notification settings and categories
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            PushNotificationService.shared.updateNotificationSettings()
+            PushNotificationService.shared.checkNotificationCategories()
         }
+        
+        // Clear any old notifications when app starts
+        PushNotificationService.shared.clearAllPendingNotifications()
         
         // Do NOT fetch FCM token here; wait until APNs token is set in didRegisterForRemoteNotifications
         
@@ -118,26 +117,7 @@ extension AppDelegate: MessagingDelegate {
     }
 }
 
-// Foreground presentation + tap handlers
-extension AppDelegate: UNUserNotificationCenterDelegate {
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                willPresent notification: UNNotification,
-                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        print("🔔 Will present notification: \(notification.request.content.title ?? "No title")")
-        print("🔔 Notification body: \(notification.request.content.body)")
-        print("🔔 Notification data: \(notification.request.content.userInfo)")
-        completionHandler([.banner, .list, .sound, .badge])
-    }
-    
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                didReceive response: UNNotificationResponse,
-                                withCompletionHandler completionHandler: @escaping () -> Void) {
-        print("🔔 Did receive notification response: \(response.notification.request.content.title ?? "No title")")
-        print("🔔 Response action identifier: \(response.actionIdentifier)")
-        // Handle notification tap if needed
-        completionHandler()
-    }
-}
+
 
 extension AppDelegate {
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {

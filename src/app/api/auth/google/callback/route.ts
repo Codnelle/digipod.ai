@@ -57,6 +57,26 @@ export async function GET(req: NextRequest) {
       { merge: true }
     );
     console.log('Gmail tokens saved for UID:', uid);
+
+    // Create emailSettings document for email monitoring
+    try {
+      const emailSettingsRef = db.collection('emailSettings').doc(uid);
+      await emailSettingsRef.set({
+        userId: uid,
+        provider: 'gmail',
+        email: email,
+        gmailToken: JSON.stringify(tokens),
+        isActive: true,
+        checkInterval: 30, // Check every 30 minutes
+        lastChecked: new Date(),
+        createdAt: new Date()
+      }, { merge: true });
+      console.log('Email settings created for UID:', uid);
+    } catch (error) {
+      console.error('Error creating email settings:', error);
+      // Don't fail the OAuth flow if email settings creation fails
+    }
+
     // For demo, show success
     return NextResponse.redirect(`${origin}/dashboard?gmail=connected`);
   } catch (err) {

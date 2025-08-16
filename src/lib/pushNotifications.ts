@@ -7,6 +7,7 @@ export type PushOptions = {
   body?: string;
   data?: Record<string, string>;
   silent?: boolean;
+  category?: 'EMAIL_NOTIFICATION' | 'PROJECT_NOTIFICATION' | 'GENERAL_NOTIFICATION';
 };
 
 async function getAllTokensForUser(userId: string): Promise<string[]> {
@@ -39,7 +40,7 @@ async function pruneInvalidTokens(userId: string, invalidTokens: string[]) {
 }
 
 export async function sendPushToUser(opts: PushOptions): Promise<string | null> {
-  const { userId, title, body, data = {}, silent } = opts;
+  const { userId, title, body, data = {}, silent, category = 'GENERAL_NOTIFICATION' } = opts;
 
   try {
     const allTokens = await getAllTokensForUser(userId);
@@ -54,7 +55,12 @@ export async function sendPushToUser(opts: PushOptions): Promise<string | null> 
     const messaging = getMessaging();
     const isSilent = Boolean(silent);
 
-    type ApsPayload = { sound?: string; 'content-available'?: number };
+    type ApsPayload = { 
+      sound?: string; 
+      'content-available'?: number;
+      category?: string;
+      'mutable-content'?: number;
+    };
 
     const baseMessage: Omit<MulticastMessage, 'tokens'> = {
       data: {
@@ -67,9 +73,15 @@ export async function sendPushToUser(opts: PushOptions): Promise<string | null> 
           'apns-push-type': isSilent ? 'background' : 'alert',
           'apns-priority': isSilent ? '5' : '10',
           'apns-topic': 'com.kashish.digipod.digipod',
+
         },
         payload: {
-          aps: (isSilent ? { 'content-available': 1 } : { sound: 'default' }) as ApsPayload,
+          aps: (isSilent ? { 'content-available': 1 } : { 
+            sound: 'default',
+            category: category,
+            'mutable-content': 1,
+
+          }) as ApsPayload,
         },
       },
       ...(isSilent ? {} : { notification: { title: title || 'Digipod', body: body || '' } }),

@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
         description: geminiRes.subject || subject || 'AI draft',
       },
       silent: false,
+      category: 'EMAIL_NOTIFICATION',
     });
   }
 
@@ -88,6 +89,7 @@ export async function POST(req: NextRequest) {
             description: `Phase advanced to ${nextPhase}`,
           },
           silent: false,
+          category: 'PROJECT_NOTIFICATION',
         });
       }
     }

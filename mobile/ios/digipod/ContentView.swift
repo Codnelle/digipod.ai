@@ -50,20 +50,16 @@ struct LoadingView: View {
 // MARK: - Authentication View
 struct AuthView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
-    @State private var isSignUp = false
     
     var body: some View {
         NavigationView {
             VStack(spacing: 30) {
                 // Logo
                 VStack {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 60))
-                        .foregroundColor(.yellow)
-                    Text("Digipod")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
+                    Image("digipod-7")
+                        .resizable()
+                        .frame(width: 160, height: 160)
+                   
                     Text("Your AI-powered productivity companion")
                         .font(.subheadline)
                         .foregroundColor(.gray)
@@ -73,21 +69,17 @@ struct AuthView: View {
                 
                 // Auth Form
                 VStack(spacing: 20) {
-                    if isSignUp {
-                        TextField("Name", text: $authViewModel.name)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .foregroundColor(.white)
-                    }
-                    
                     TextField("Email", text: $authViewModel.email)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .foregroundColor(.white)
+                        .foregroundColor(.black)
+                        .background(.white)
                         .keyboardType(.emailAddress)
                         .autocapitalization(.none)
                     
                     SecureField("Password", text: $authViewModel.password)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .foregroundColor(.white)
+                        .foregroundColor(.black)
+                        .background(.white)
                     
                     if let error = authViewModel.error {
                         Text(error)
@@ -97,11 +89,7 @@ struct AuthView: View {
                     }
                     
                     Button(action: {
-                        if isSignUp {
-                            authViewModel.signUp()
-                        } else {
                             authViewModel.signIn()
-                        }
                     }) {
                         HStack {
                             if authViewModel.isLoading {
@@ -109,12 +97,12 @@ struct AuthView: View {
                                     .progressViewStyle(CircularProgressViewStyle(tint: .black))
                                     .scaleEffect(0.8)
                             }
-                            Text(isSignUp ? "Sign Up" : "Sign In")
+                            Text("Sign In")
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity)
         .padding()
-                        .background(Color.purple)
+                        .background(Color.white)
                         .foregroundColor(.black)
                         .cornerRadius(10)
                     }
@@ -122,19 +110,9 @@ struct AuthView: View {
                 }
                 .padding(.horizontal, 30)
                 
-                // Toggle Sign In/Sign Up
-                Button(action: {
-                    isSignUp.toggle()
-                    authViewModel.error = nil
-                }) {
-                    Text(isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up")
-                        .foregroundColor(.yellow)
-                        .underline()
-                }
-                
                 Spacer()
             }
-            .background(Color.black)
+            .background(Color.indigo)
             .navigationBarHidden(true)
         }
         .navigationViewStyle(StackNavigationViewStyle())
@@ -172,7 +150,7 @@ struct MainTabView: View {
                     Text("Settings")
                 }
         }
-        .accentColor(Color.purple) // Digipod yellow
+                        .accentColor(.indigo) // Use system accent color
         .preferredColorScheme(.dark)
     }
 }
@@ -183,7 +161,6 @@ struct Session: Codable { let uid: String; let email: String?; let displayName: 
 class AuthViewModel: ObservableObject {
     @Published var email = ""
     @Published var password = ""
-    @Published var name = ""
     @Published var isLoading = true
     @Published var isAuthenticated = false
     @Published var error: String?
@@ -263,33 +240,6 @@ class AuthViewModel: ObservableObject {
         }
     }
     
-    func signUp() {
-        isLoading = true
-        error = nil
-        print("Attempting to sign up with: \(email)")
-        
-        Auth.auth().createUser(withEmail: email, password: password) { [weak self] result, error in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-                if let error = error {
-                    print("Sign up error: \(error.localizedDescription)")
-                    self?.error = error.localizedDescription
-                } else if let user = result?.user {
-                    print("Sign up successful! User: \(user.email ?? "unknown")")
-                    // Save user data to Firestore (similar to web app)
-                    self?.saveUserData(user: user)
-                    self?.registerPushTokenIfAvailable()
-                }
-            }
-        }
-    }
-    
-    private func saveUserData(user: FirebaseAuth.User) {
-        // This would save to Firestore like in the web app
-        // For now, we'll just handle the auth
-        print("User signed up: \(user.email ?? "unknown")")
-    }
-    
     func signOut() {
         do {
             try Auth.auth().signOut()
@@ -303,60 +253,13 @@ class AuthViewModel: ObservableObject {
 
 // MARK: - Home ViewModel
 class HomeViewModel: ObservableObject {
-    @Published var dashboardSummary: DashboardSummary?
-    @Published var upcomingTodos: [Todo] = []
-    @Published var aiDrafts: [AIDraft] = []
-    @Published var calendarEvents: [CalendarEvent] = []
     @Published var isLoading = false
-    @Published var error: String?
     
     private let apiService = APIService()
-    private let changeDetectionService = ChangeDetectionService.shared
     
     func loadDashboardData() {
-        isLoading = true
-        error = nil
-        Task {
-            do {
-                async let drafts = apiService.fetchAIDrafts()
-                async let events = apiService.fetchCalendarEvents()
-                async let summary = apiService.fetchDashboardSummary()
-                let (draftsResult, eventsResult, summaryResult) = await (try? drafts, try? events, try? summary)
-                
-                await MainActor.run {
-                    self.aiDrafts = draftsResult ?? []
-                    self.calendarEvents = eventsResult ?? []
-                    self.dashboardSummary = summaryResult
-                    
-                    // Extract todos from the dashboard summary changes
-                    if let summary = summaryResult {
-                        let todoChanges = summary.changes?.filter { $0.type == .new_todo } ?? []
-                        self.upcomingTodos = todoChanges.map { change in
-                            Todo(
-                                id: change.id,
-                                task: change.description.replacingOccurrences(of: "New AI-extracted todo: \"", with: "").replacingOccurrences(of: "\"", with: ""),
-                                projectId: change.projectId ?? "general",
-                                projectName: change.projectName ?? "General",
-                                status: "pending",
-                                confidence: change.impact == .high ? 0.9 : change.impact == .medium ? 0.7 : 0.5,
-                                createdAt: Date(),
-                                dueDate: nil
-                            )
-                        }
-                        
-                        // Check for new changes and send notifications
-                        self.changeDetectionService.checkForNewChanges(summary.changes)
-                    }
-                    
-                    self.isLoading = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error.localizedDescription
-                    self.isLoading = false
-                }
-            }
-        }
+        // No data loading needed for main dashboard - just show titles
+        isLoading = false
     }
 }
 
@@ -393,15 +296,11 @@ struct HomeView: View {
                             title: "Upcoming To-Dos",
                             icon: "checklist",
                             color: .blue,
-                            count: viewModel.upcomingTodos.count
+                            count: 0
                         ) {
-                            if viewModel.upcomingTodos.isEmpty {
-                                Text("No upcoming todos")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            } else {
-                                UpcomingTodosView(todos: viewModel.upcomingTodos)
-                            }
+                            Text("View and manage your tasks")
+                                .font(.caption)
+                                .foregroundColor(.gray)
                         }
                         .onTapGesture {
                             showingUpcomingTodosDetail = true
@@ -412,41 +311,11 @@ struct HomeView: View {
                             title: "What's Changed",
                             icon: "sparkles",
                             color: .yellow,
-                            count: viewModel.dashboardSummary == nil ? 0 : 1
+                            count: 0
                         ) {
-                            if let summary = viewModel.dashboardSummary {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Total Projects: \(summary.totalProjects)")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    Text("Active Projects: \(summary.activeProjects)")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    Text("Pending Tasks: \(summary.pendingTasks)")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    Text("AI Responses: \(summary.aiResponses)")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    Text("Time Saved: \(summary.timeSaved)")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    if !summary.recentActivity.isEmpty {
-                                        Text("Recent Activity:")
-                                            .font(.caption2)
-                                            .foregroundColor(.yellow)
-                                        ForEach(Array(summary.recentActivity.prefix(3))) { activity in
-                                            Text("- \(activity.title)")
-                                                .font(.caption2)
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                }
-                            } else {
-                                Text("No recent changes")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
+                            Text("View recent AI activities and changes")
+                                .font(.caption)
+                                .foregroundColor(.gray)
                         }
                         .onTapGesture {
                             showingWhatsChangedDetail = true
@@ -457,15 +326,11 @@ struct HomeView: View {
                             title: "AI Drafts",
                             icon: "brain.head.profile",
                             color: .purple,
-                            count: viewModel.aiDrafts.count
+                            count: 0
                         ) {
-                            if viewModel.aiDrafts.isEmpty {
-                                Text("No AI drafts")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            } else {
-                                AIDraftsView(drafts: viewModel.aiDrafts)
-                            }
+                            Text("Review AI-generated email drafts")
+                                .font(.caption)
+                                .foregroundColor(.gray)
                         }
                         .onTapGesture {
                             showingAIDraftsDetail = true
@@ -476,15 +341,11 @@ struct HomeView: View {
                             title: "Calendar Events",
                             icon: "calendar",
                             color: .green,
-                            count: viewModel.calendarEvents.count
+                            count: 0
                         ) {
-                            if viewModel.calendarEvents.isEmpty {
-                                Text("No calendar events")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            } else {
-                                CalendarEventsView(events: viewModel.calendarEvents)
-                            }
+                            Text("View your scheduled events")
+                                .font(.caption)
+                                .foregroundColor(.gray)
                         }
                         .onTapGesture {
                             showingCalendarEventsDetail = true
@@ -496,6 +357,7 @@ struct HomeView: View {
             }
             .navigationTitle("Home")
             .navigationBarHidden(true)
+
         }
         .navigationViewStyle(StackNavigationViewStyle())
         .sheet(isPresented: $showingWhatsChangedDetail) {
@@ -541,14 +403,6 @@ struct DashboardCard<Content: View>: View {
                     .foregroundColor(.white)
                 
                 Spacer()
-                
-                Text("\(count)")
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(color.opacity(0.2))
-                    .foregroundColor(color)
-                    .cornerRadius(8)
             }
             
             content
@@ -848,10 +702,10 @@ struct PipTabView: View {
                                     Text(prompt.label)
                                         .font(.caption)
                                         .fontWeight(.medium)
-                                        .foregroundColor(.white)
+                                        .foregroundColor(.black)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
-                                        .background(Color.blue)
+                                        .background(Color.white)
                                         .cornerRadius(16)
                                 }
                             }
@@ -863,6 +717,7 @@ struct PipTabView: View {
                     HStack(spacing: 12) {
                         TextField("Type a task or question...", text: $messageInput)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .foregroundColor(.primary)
                             .disabled(viewModel.isLoading)
                         
                         Button(action: {
@@ -870,9 +725,9 @@ struct PipTabView: View {
                             messageInput = ""
                         }) {
                             Image(systemName: "paperplane.fill")
-                                .foregroundColor(.white)
+                                .foregroundColor(.black)
                                 .padding(8)
-                                .background(Color.blue)
+                                .background(Color.white)
                                 .cornerRadius(8)
                         }
                         .disabled(messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isLoading)
@@ -918,12 +773,13 @@ struct PipAvatarView: View {
         VStack(spacing: 4) {
             ZStack {
                 Circle()
-                    .fill(Color.purple)
+                    .fill(Color.white)
                     .frame(width: 48, height: 48)
-                    .shadow(color: .purple.opacity(0.3), radius: 4)
+                                          .shadow(color: .white.opacity(0.3), radius: 4)
                 
                 Text(pipEmoji)
                     .font(.title2)
+                    .foregroundColor(.black)
             }
             
             Text(pipMessage)
@@ -1076,8 +932,7 @@ struct NotesTabView: View {
     @StateObject private var viewModel = NotesViewModel()
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
                 // Header
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Notes")
@@ -1179,13 +1034,12 @@ struct NotesTabView: View {
                     .padding(.bottom, 8)
                 }
             }
-            .navigationBarHidden(true)
             .onAppear {
                 viewModel.loadNotes()
             }
         }
     }
-}
+
 
 // MARK: - Notes ViewModel
 class NotesViewModel: ObservableObject {
@@ -1260,9 +1114,15 @@ struct SettingsView: View {
     @StateObject private var apiService = APIService()
     @State private var notificationsEnabled = true
     @State private var darkModeEnabled = true
-    @State private var isTestingNotification = false
     @State private var displayName = ""
     @State private var user: FirebaseAuth.User?
+    @State private var showDeleteAccountAlert = false
+    @State private var showPrivacyPolicy = false
+    @State private var showTermsAndConditions = false
+    @State private var showSupport = false
+    @State private var showAbout = false
+    @State private var showDeleteAccountError = false
+    @State private var deleteAccountErrorMessage = ""
     
     var body: some View {
         NavigationView {
@@ -1375,72 +1235,6 @@ struct SettingsView: View {
                                             .font(.body)
                                     }
                                 }
-                                
-                                                                       Button(action: {
-                                           testPushNotification()
-                                       }) {
-                                           HStack {
-                                               Image(systemName: "bell.badge")
-                                                   .foregroundColor(.green)
-                                               Text("Test Push Notification")
-                                                   .font(.body)
-                                               Spacer()
-                                               if isTestingNotification {
-                                                   ProgressView()
-                                                       .scaleEffect(0.8)
-                                               }
-                                           }
-                                       }
-                                       .disabled(isTestingNotification)
-                                       
-                                       Button(action: {
-                                           testLocalNotification()
-                                       }) {
-                                           HStack {
-                                               Image(systemName: "bell")
-                                                   .foregroundColor(.orange)
-                                               Text("Test Local Notification")
-                                                   .font(.body)
-                                               Spacer()
-                                           }
-                                       }
-                                       .disabled(isTestingNotification)
-                                       
-                                       Button(action: {
-                                           testBackendConnection()
-                                       }) {
-                                           HStack {
-                                               Image(systemName: "network")
-                                                   .foregroundColor(.blue)
-                                               Text("Test Backend Connection")
-                                                   .font(.body)
-                                               Spacer()
-                                           }
-                                       }
-                                       
-                                       Button(action: {
-                                           testAuthenticationStatus()
-                                       }) {
-                                           HStack {
-                                               Image(systemName: "person.circle")
-                                                   .foregroundColor(.orange)
-                                               Text("Test Authentication Status")
-                                                   .font(.body)
-                                               Spacer()
-                                           }
-                                       }
-                                       
-                                       Button(action: {
-                                           testCopilotConnection()
-                                       }) {
-                                           HStack {
-                                               Image(systemName: "message.circle")
-                                                   .foregroundColor(.purple)
-                                               Text("Test Copilot Connection")
-                                                   .font(.body)
-                                               Spacer()
-                                           }
-                                       }
                             }
                         }
                         .padding(16)
@@ -1477,31 +1271,108 @@ struct SettingsView: View {
                     // Support Section
                     VStack(spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Support")
+                            Text("Support & Legal")
                                 .font(.headline)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.primary)
                             
                             VStack(spacing: 12) {
-                                HStack {
-                                    Image(systemName: "questionmark.circle.fill")
-                                        .foregroundColor(.yellow)
-                                    Text("Help & Support")
-                                        .font(.body)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .foregroundColor(.gray)
+                                Button(action: {
+                                    openPrivacyPolicy()
+                                }) {
+                                    HStack {
+                                        Image(systemName: "hand.raised.fill")
+                                            .foregroundColor(.blue)
+                                        Text("Privacy Policy")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.gray)
+                                    }
                                 }
+                                .buttonStyle(PlainButtonStyle())
                                 
-                                HStack {
-                                    Image(systemName: "info.circle.fill")
-                                        .foregroundColor(.yellow)
-                                    Text("About")
-                                        .font(.body)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .foregroundColor(.gray)
+                                Button(action: {
+                                    openTermsAndConditions()
+                                }) {
+                                    HStack {
+                                        Image(systemName: "doc.text.fill")
+                                            .foregroundColor(.green)
+                                        Text("Terms & Conditions")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.gray)
+                                    }
                                 }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: {
+                                    openSupport()
+                                }) {
+                                    HStack {
+                                        Image(systemName: "questionmark.circle.fill")
+                                            .foregroundColor(.yellow)
+                                        Text("Help & Support")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: {
+                                    openAbout()
+                                }) {
+                                    HStack {
+                                        Image(systemName: "info.circle.fill")
+                                            .foregroundColor(.purple)
+                                        Text("About")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(16)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 16)
+                    
+                    // Account Management Section
+                    VStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Account")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            
+                            VStack(spacing: 12) {
+                                Button(action: {
+                                    showDeleteAccountAlert = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "trash.fill")
+                                            .foregroundColor(.red)
+                                        Text("Delete Account")
+                                            .font(.body)
+                                            .foregroundColor(.red)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                         .padding(16)
@@ -1519,6 +1390,31 @@ struct SettingsView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        .sheet(isPresented: $showPrivacyPolicy) {
+            PrivacyPolicyView()
+        }
+        .sheet(isPresented: $showTermsAndConditions) {
+            TermsAndConditionsView()
+        }
+        .sheet(isPresented: $showSupport) {
+            SupportView()
+        }
+        .sheet(isPresented: $showAbout) {
+            AboutView()
+        }
+        .alert("Delete Account", isPresented: $showDeleteAccountAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteAccount()
+            }
+        } message: {
+            Text("Are you sure you want to delete your account? This action cannot be undone and will permanently remove all your data.")
+        }
+        .alert("Error Deleting Account", isPresented: $showDeleteAccountError) {
+            Button("OK") { }
+        } message: {
+            Text(deleteAccountErrorMessage)
+        }
     }
     
     private var avatarInitial: String {
@@ -1537,97 +1433,51 @@ struct SettingsView: View {
         }
     }
     
-               private func testPushNotification() {
-               isTestingNotification = true
-               
-               Task {
-                   do {
-                       let success = try await apiService.sendTestNotification()
-                       await MainActor.run {
-                           isTestingNotification = false
-                           if success {
-                               print("✅ Test notification sent successfully")
-                           } else {
-                               print("❌ Test notification failed")
-                           }
-                       }
-                   } catch {
-                       await MainActor.run {
-                           isTestingNotification = false
-                           print("❌ Error sending test notification: \(error)")
-                       }
-                   }
-               }
-           }
-           
-                       private func testLocalNotification() {
-                let content = UNMutableNotificationContent()
-                content.title = "Local Test Notification"
-                content.body = "This is a test local notification to verify the device notification system is working"
-                content.sound = .default
-                content.badge = 1
-                
-                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-                let request = UNNotificationRequest(identifier: "localTest", content: content, trigger: trigger)
-                
-                UNUserNotificationCenter.current().add(request) { error in
-                    if let error = error {
-                        print("❌ Error scheduling local notification: \(error)")
+    private func openPrivacyPolicy() {
+        showPrivacyPolicy = true
+    }
+    
+    private func openTermsAndConditions() {
+        showTermsAndConditions = true
+    }
+    
+    private func openSupport() {
+        showSupport = true
+    }
+    
+    private func openAbout() {
+        showAbout = true
+    }
+    
+    private func deleteAccount() {
+        Task {
+            do {
+                if let currentUser = Auth.auth().currentUser {
+                    // Delete user data from backend first
+                    let success = try await apiService.deleteUserAccount(userId: currentUser.uid)
+                    
+                    if success {
+                        // Delete the Firebase user account
+                        try await currentUser.delete()
+                        
+                        await MainActor.run {
+                            authViewModel.signOut()
+                        }
                     } else {
-                        print("✅ Local notification scheduled successfully")
+                        await MainActor.run {
+                            deleteAccountErrorMessage = "Failed to delete user data from backend. Please try again."
+                            showDeleteAccountError = true
+                        }
                     }
                 }
+            } catch {
+                await MainActor.run {
+                    deleteAccountErrorMessage = "Error deleting account: \(error.localizedDescription)"
+                    showDeleteAccountError = true
+                }
             }
-           
-           private func testBackendConnection() {
-               Task {
-                   do {
-                       let success = try await apiService.testBackendConnection()
-                       await MainActor.run {
-                           if success {
-                               print("✅ Backend connection test successful")
-                           } else {
-                               print("❌ Backend connection test failed")
-                           }
-                       }
-                   } catch {
-                       await MainActor.run {
-                           print("❌ Error testing backend connection: \(error)")
-                       }
-                   }
-               }
-           }
-           
-           private func testAuthenticationStatus() {
-               if let currentUser = Auth.auth().currentUser {
-                   print("✅ User is authenticated:")
-                   print("   - Email: \(currentUser.email ?? "unknown")")
-                   print("   - UID: \(currentUser.uid)")
-                   print("   - Email verified: \(currentUser.isEmailVerified)")
-                   print("   - Provider data: \(currentUser.providerData.map { $0.providerID })")
-               } else {
-                   print("❌ No user is currently authenticated")
-               }
-           }
-           
-           private func testCopilotConnection() {
-               Task {
-                   do {
-                       let success = try await apiService.testCopilotConnection()
-                       await MainActor.run {
-                           if success {
-                               print("✅ Copilot connection test successful")
-                           } else {
-                               print("❌ Copilot connection test failed")
-                           }
-                       }
-                   } catch {
-                       await MainActor.run {
-                           print("❌ Error testing Copilot connection: \(error)")
-                       }
-                   }
-               }
-           }
+        }
+    }
 }
 
 // MARK: - Supporting Views
@@ -1641,37 +1491,6 @@ struct WhatsChangedDetailView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 16) {
-                    // Debug section
-                    VStack(spacing: 8) {
-                        Text("Debug Info")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        
-                        Button("Test Authentication") {
-                            Task {
-                                if let user = Auth.auth().currentUser {
-                                    print("🔍 Current user: \(user.email ?? "unknown")")
-                                    do {
-                                        let token = try await user.getIDToken()
-                                        print("🔍 Token: \(token.prefix(50))...")
-                                    } catch {
-                                        print("❌ Token error: \(error)")
-                                    }
-                                } else {
-                                    print("❌ No current user")
-                                }
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button("Test API Call") {
-                            viewModel.loadChanges()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
                     
                     if viewModel.isLoading {
                         ProgressView("Loading changes...")
@@ -1971,6 +1790,8 @@ class WhatsChangedDetailViewModel: ObservableObject {
             }
         }
     }
+    
+
 }
 
 // MARK: - Supporting Views
@@ -3496,9 +3317,9 @@ struct PhaseStepperView: View {
                     
                     VStack(spacing: 8) {
                         ZStack {
-                            let circleColor = isActive ? Color.purple : isCompleted ? Color.green : Color.gray.opacity(0.3)
+                            let circleColor = isActive ? Color.white : isCompleted ? Color.green : Color.gray.opacity(0.3)
                             let circleSize = isActive ? 56.0 : 44.0
-                            let shadowColor = isActive ? Color.purple.opacity(0.5) : Color.clear
+                            let shadowColor = isActive ? Color.white.opacity(0.5) : Color.clear
                             let shadowRadius = isActive ? 8.0 : 0.0
                             
                             Circle()
@@ -3512,7 +3333,7 @@ struct PhaseStepperView: View {
                                 .font(.system(size: iconSize, weight: .bold))
                         }
                         
-                        let textColor = isActive ? Color.purple : isCompleted ? Color.green : Color.gray
+                                                    let textColor = isActive ? Color.white : isCompleted ? Color.green : Color.gray
                         let textWeight = isActive ? Font.Weight.bold : Font.Weight.regular
                         
                         Text(phase)
@@ -3543,7 +3364,7 @@ struct PhaseStepperView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(Color.purple)
+                    .background(Color.white)
                     .cornerRadius(8)
                 }
                 .disabled(phases.firstIndex(of: currentPhase) == 0 || isLoading)
@@ -3559,7 +3380,7 @@ struct PhaseStepperView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(Color.purple)
+                    .background(Color.white)
                     .cornerRadius(8)
                 }
                 .disabled(phases.firstIndex(of: currentPhase) == phases.count - 1 || isLoading)
@@ -3590,13 +3411,66 @@ class PushNotificationService: NSObject, ObservableObject {
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
+        configureNotificationCategories()
+    }
+    
+    func configureNotificationCategories() {
+        // Create notification categories for better handling on connected devices
+        let emailCategory = UNNotificationCategory(
+            identifier: "EMAIL_NOTIFICATION",
+            actions: [
+                UNNotificationAction(
+                    identifier: "REPLY",
+                    title: "Reply",
+                    options: [.foreground]
+                ),
+                UNNotificationAction(
+                    identifier: "MARK_READ",
+                    title: "Mark as Read",
+                    options: []
+                )
+            ],
+            intentIdentifiers: [],
+            options: [.allowAnnouncement, .hiddenPreviewsShowTitle]
+        )
+        
+        let projectCategory = UNNotificationCategory(
+            identifier: "PROJECT_NOTIFICATION",
+            actions: [
+                UNNotificationAction(
+                    identifier: "VIEW_PROJECT",
+                    title: "View Project",
+                    options: [.foreground]
+                )
+            ],
+            intentIdentifiers: [],
+            options: [.allowAnnouncement, .hiddenPreviewsShowTitle]
+        )
+        
+        let generalCategory = UNNotificationCategory(
+            identifier: "GENERAL_NOTIFICATION",
+            actions: [],
+            intentIdentifiers: [],
+            options: [.allowAnnouncement, .hiddenPreviewsShowTitle]
+        )
+        
+        // Register categories
+        UNUserNotificationCenter.current().setNotificationCategories([
+            emailCategory,
+            projectCategory,
+            generalCategory
+        ])
     }
     
     func requestPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+        // Request comprehensive notification permissions
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound, .provisional, .announcement]) { granted, error in
             DispatchQueue.main.async {
                 if granted {
                     self.registerForRemoteNotifications()
+                    print("✅ Notification permissions granted")
+                } else {
+                    print("❌ Notification permissions denied")
                 }
             }
             if let error = error {
@@ -3627,16 +3501,98 @@ class PushNotificationService: NSObject, ObservableObject {
             }
         }
     }
+    
+    func updateNotificationSettings() {
+        let center = UNUserNotificationCenter.current()
+        
+        center.getNotificationSettings { settings in
+            print("📱 Notification Settings:")
+            print("   - Authorization Status: \(settings.authorizationStatus.rawValue)")
+            print("   - Alert Setting: \(settings.alertSetting.rawValue)")
+            print("   - Badge Setting: \(settings.badgeSetting.rawValue)")
+            print("   - Sound Setting: \(settings.soundSetting.rawValue)")
+            print("   - Critical Alert Setting: \(settings.criticalAlertSetting.rawValue)")
+            print("   - Announcement Setting: \(settings.announcementSetting.rawValue)")
+            print("   - Car Play Setting: \(settings.carPlaySetting.rawValue)")
+        }
+    }
+    
+    func checkNotificationCategories() {
+        let center = UNUserNotificationCenter.current()
+        
+        center.getNotificationCategories { categories in
+            print("📱 Notification Categories:")
+            for category in categories {
+                print("   - Category: \(category.identifier)")
+                print("     Actions: \(category.actions.map { $0.identifier })")
+                print("     Options: \(category.options)")
+            }
+        }
+        
+
+    }
+    
+    func clearAllPendingNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
+        print("🧹 Cleared all pending and delivered notifications")
+    }
 }
 
 // MARK: - UNUserNotificationCenterDelegate
 extension PushNotificationService: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound, .badge])
+        print("🔔 Will present notification: \(notification.request.content.title ?? "No title")")
+        print("🔔 Notification body: \(notification.request.content.body)")
+        print("🔔 Notification data: \(notification.request.content.userInfo)")
+        
+        // Enhanced presentation options for connected devices
+        var options: UNNotificationPresentationOptions = [.banner, .list, .sound, .badge]
+        
+        // Add announcement support for CarPlay and other connected devices
+        if #available(iOS 14.0, *) {
+            options.insert(.banner)
+        }
+        
+
+        
+        completionHandler(options)
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        print("🔔 Did receive notification response: \(response.notification.request.content.title ?? "No title")")
+        print("🔔 Response action identifier: \(response.actionIdentifier)")
+        print("🔔 Notification category: \(response.notification.request.content.categoryIdentifier)")
+        
         let userInfo = response.notification.request.content.userInfo
+        
+        // Handle different notification actions for connected devices
+        switch response.actionIdentifier {
+        case "REPLY":
+            print("🔔 User tapped Reply action")
+            // Handle reply action - could open compose screen
+            break
+        case "MARK_READ":
+            print("🔔 User tapped Mark as Read action")
+            // Handle mark as read action
+            break
+        case "VIEW_PROJECT":
+            print("🔔 User tapped View Project action")
+            // Handle view project action
+            break
+        case UNNotificationDefaultActionIdentifier:
+            print("🔔 User tapped default action")
+            // Handle default tap action
+            break
+        case UNNotificationDismissActionIdentifier:
+            print("🔔 User dismissed notification")
+            // Handle dismiss action
+            break
+        default:
+            print("🔔 Unknown action: \(response.actionIdentifier)")
+        }
+        
         print("📱 Notification tapped with userInfo: \(userInfo)")
         completionHandler()
     }
@@ -3646,7 +3602,6 @@ extension PushNotificationService: UNUserNotificationCenterDelegate {
 class ChangeDetectionService: ObservableObject {
     static let shared = ChangeDetectionService()
     
-    private var lastChangeCount = 0
     private var lastChangeTimestamp: Date?
     private let notificationService = PushNotificationService.shared
     private let apiService = APIService()
@@ -3654,19 +3609,43 @@ class ChangeDetectionService: ObservableObject {
     func checkForNewChanges(_ changes: [AIChange]?) {
         guard let changes = changes else { return }
         
-        let currentChangeCount = changes.count
-        let hasNewChanges = currentChangeCount > lastChangeCount
+        // Get the most recent change timestamp
+        let mostRecentChange = changes.max { change1, change2 in
+            let date1 = ISO8601DateFormatter().date(from: change1.timestamp) ?? Date.distantPast
+            let date2 = ISO8601DateFormatter().date(from: change2.timestamp) ?? Date.distantPast
+            return date1 < date2
+        }
         
-        if hasNewChanges {
-            let newChanges = changes.suffix(currentChangeCount - lastChangeCount)
-            notifyAboutNewChanges(newChanges)
+        guard let mostRecentChange = mostRecentChange else { return }
+        
+        // Parse the timestamp
+        let formatter = ISO8601DateFormatter()
+        guard let changeDate = formatter.date(from: mostRecentChange.timestamp) else { return }
+        
+        // Check if this is a new change (more recent than our last known change)
+        let isNewChange = lastChangeTimestamp == nil || changeDate > lastChangeTimestamp!
+        
+        if isNewChange {
+            // Find all changes that are newer than our last known timestamp
+            let newChanges = changes.filter { change in
+                guard let changeDate = formatter.date(from: change.timestamp) else { return false }
+                return lastChangeTimestamp == nil || changeDate > lastChangeTimestamp!
+            }
             
-            lastChangeCount = currentChangeCount
-            lastChangeTimestamp = Date()
+            if !newChanges.isEmpty {
+                notifyAboutNewChanges(newChanges)
+                lastChangeTimestamp = changeDate
+            }
         }
     }
     
-    private func notifyAboutNewChanges(_ changes: ArraySlice<AIChange>) {
+    private func notifyAboutNewChanges(_ changes: [AIChange]) {
+        // Only send notifications if app is not in foreground
+        guard UIApplication.shared.applicationState != .active else {
+            print("📱 App is in foreground, skipping local notifications")
+            return
+        }
+        
         for change in changes {
             let title = "New Activity Detected"
             let body = getNotificationBody(for: change)
@@ -3752,11 +3731,354 @@ class ChangeDetectionService: ObservableObject {
     }
     
     func resetChangeCount() {
-        lastChangeCount = 0
         lastChangeTimestamp = nil
     }
 }
 
 #Preview {
     ContentView()
+}
+
+// MARK: - Privacy Policy View
+struct PrivacyPolicyView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Privacy Policy")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .padding(.bottom, 8)
+                    
+                    Group {
+                        Text("Last updated: December 2024")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Your Privacy Matters")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("At Digipod, we are committed to protecting your privacy and ensuring the security of your personal information. This Privacy Policy explains how we collect, use, and safeguard your data.")
+                        
+                        Text("Information We Collect")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("• Account information (email, name)\n• Project data and communications\n• Email content for AI processing\n• Usage analytics and app interactions")
+                        
+                        Text("How We Use Your Information")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("• Provide AI-powered email management\n• Generate project insights and summaries\n• Improve our services and user experience\n• Send important notifications and updates")
+                        
+                        Text("Data Security")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("We implement industry-standard security measures to protect your data, including encryption, secure servers, and regular security audits.")
+                        
+                        Text("Contact Us")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("If you have any questions about this Privacy Policy, please contact us at privacy@digipod.ai")
+                    }
+                    .font(.body)
+                }
+                .padding()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Terms and Conditions View
+struct TermsAndConditionsView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Terms & Conditions")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .padding(.bottom, 8)
+                    
+                    Group {
+                        Text("Last updated: December 2024")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Acceptance of Terms")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("By using Digipod, you agree to be bound by these Terms and Conditions. If you do not agree to these terms, please do not use our service.")
+                        
+                        Text("Service Description")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("Digipod provides AI-powered email management and project coordination services. We use artificial intelligence to process emails, generate responses, and manage project workflows.")
+                        
+                        Text("User Responsibilities")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("• Provide accurate account information\n• Maintain the security of your account\n• Use the service in compliance with applicable laws\n• Not misuse or attempt to compromise our systems")
+                        
+                        Text("Intellectual Property")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("All content, features, and functionality of Digipod are owned by us and protected by copyright, trademark, and other intellectual property laws.")
+                        
+                        Text("Limitation of Liability")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("Digipod is provided 'as is' without warranties. We are not liable for any damages arising from the use of our service.")
+                        
+                        Text("Contact")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("For questions about these terms, contact us at legal@digipod.ai")
+                    }
+                    .font(.body)
+                }
+                .padding()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Support View
+struct SupportView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    Text("Help & Support")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .padding(.bottom, 8)
+                    
+                    VStack(spacing: 16) {
+                        SupportCard(
+                            title: "Getting Started",
+                            description: "Learn how to set up your first project and connect your email",
+                            icon: "star.fill",
+                            color: .blue
+                        )
+                        
+                        SupportCard(
+                            title: "Email Integration",
+                            description: "Connect your Gmail or IMAP account for AI-powered email management",
+                            icon: "envelope.fill",
+                            color: .green
+                        )
+                        
+                        SupportCard(
+                            title: "AI Features",
+                            description: "Understand how AI drafts, summaries, and project insights work",
+                            icon: "brain.head.profile",
+                            color: .purple
+                        )
+                        
+                        SupportCard(
+                            title: "Troubleshooting",
+                            description: "Common issues and solutions for technical problems",
+                            icon: "wrench.fill",
+                            color: .orange
+                        )
+                        
+                        VStack(spacing: 12) {
+                            Text("Need More Help?")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            Button(action: {
+                                // Open email client
+                                if let url = URL(string: "mailto:support@digipod.ai") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "envelope.fill")
+                                    Text("Email Support")
+                                }
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.white)
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - About View
+struct AboutView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // App Icon and Name
+                    VStack(spacing: 16) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 80))
+                            .foregroundColor(.white)
+                        
+                        Text("Digipod")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                        
+                        Text("AI-Powered Email Management")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Version 1.0.0")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // Features
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Features")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        FeatureRow(icon: "brain.head.profile", title: "AI Email Processing", description: "Automatically process and respond to emails")
+                        FeatureRow(icon: "doc.text", title: "Smart Drafts", description: "Generate context-aware email responses")
+                        FeatureRow(icon: "chart.line.uptrend.xyaxis", title: "Project Insights", description: "Get AI-powered project analytics and summaries")
+                        FeatureRow(icon: "checklist", title: "Task Management", description: "Extract and manage tasks from emails")
+                    }
+                    
+                    // Company Info
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("About Digipod")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        Text("Digipod is an AI-powered platform that helps professionals manage their email communications and project workflows more efficiently.")
+                        
+                        Text("© 2024 Digipod. All rights reserved.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Supporting Components
+struct SupportCard: View {
+    let title: String
+    let description: String
+    let icon: String
+    let color: Color
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(color)
+                .frame(width: 40, height: 40)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+struct FeatureRow: View {
+    let icon: String
+    let title: String
+    let description: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(.white)
+                .frame(width: 24, height: 24)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+        }
+    }
 }

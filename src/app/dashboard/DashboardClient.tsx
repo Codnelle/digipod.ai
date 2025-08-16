@@ -435,6 +435,7 @@ export default function DashboardClient() {
   // Check if user is authenticated
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log('🔄 onAuthStateChanged triggered, setting authReady to true');
       setAuthReady(true);
       console.log('onAuthStateChanged (dashboard) fired. User:', user);
       if (!user) {
@@ -548,10 +549,35 @@ export default function DashboardClient() {
     console.log('🔄 Refreshing drafts data...');
     setLoadingDrafts(true);
     try {
-      const draftsData = await fetchWithAuth<AiDraftsApiResponse>('/api/ai-drafts?status=draft&limit=10');
-      setAiDraftsData({ drafts: draftsData.drafts || [] });
+      // Get current user token
+      const user = auth.currentUser;
+      if (!user) {
+        console.log('⚠️ No current user, skipping drafts refresh');
+        setAiDraftsData({ drafts: [] });
+        return;
+      }
+      
+      const token = await user.getIdToken();
+      console.log('🔑 Got user token, calling AI drafts API...');
+      
+      const response = await fetch('/api/ai-drafts?status=draft&limit=10', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      console.log('📡 AI drafts API response status:', response.status);
+      
+      if (response.ok) {
+        const draftsData = await response.json();
+        console.log('✅ AI drafts API successful, data:', draftsData);
+        setAiDraftsData({ drafts: draftsData.drafts || [] });
+      } else {
+        const errorText = await response.text();
+        console.error('❌ AI drafts API failed:', response.status, errorText);
+        setAiDraftsData({ drafts: [] });
+      }
     } catch (error) {
-      console.error('Error refreshing drafts:', error);
+      console.error('❌ Error refreshing drafts:', error);
+      setAiDraftsData({ drafts: [] });
     } finally {
       setLoadingDrafts(false);
     }
@@ -577,9 +603,274 @@ export default function DashboardClient() {
     };
   }, [mutateTodos, refreshSummary]);
 
+  // Periodically refresh AI drafts and check for new unread emails
   useEffect(() => {
     if (!authReady) return;
+    
+    const interval = setInterval(async () => {
+      // Refresh drafts
+      refreshDrafts();
+      
+      // Check for new unread emails and generate AI drafts
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          const token = await user.getIdToken();
+          const unreadEmailsRes = await fetch('/api/gmail/unread-inbox', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (unreadEmailsRes.ok) {
+            const unreadEmails = await unreadEmailsRes.json();
+            if (unreadEmails.length > 0) {
+              console.log(`🔄 Found ${unreadEmails.length} new unread emails, generating AI drafts...`);
+              
+              for (const email of unreadEmails) {
+                try {
+                  // Generate AI reply
+                  const aiReplyRes = await fetch('/api/gemini/reply', {
+                    method: 'POST',
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}` 
+                    },
+                    body: JSON.stringify({
+                      body: email.body,
+                      tone: 'professional',
+                      template: 'default',
+                      clientName: email.from.split('@')[0] || 'Client'
+                    })
+                  });
+                  
+                  if (aiReplyRes.ok) {
+                    const aiReply = await aiReplyRes.json();
+                    
+                    // Save AI draft
+                    await fetch('/api/ai-drafts', {
+                      method: 'POST',
+                      headers: { 
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}` 
+                      },
+                      body: JSON.stringify({
+                        projectId: 'general',
+                        subject: aiReply.subject || `Re: ${email.subject}`,
+                        body: aiReply.body,
+                        from: email.from,
+                        to: email.to,
+                        originalEmailId: email.id,
+                        status: 'draft'
+                      })
+                    });
+                  }
+                } catch (error) {
+                  console.error('Error processing email:', error);
+                }
+              }
+              
+              // Refresh drafts after processing new emails
+              setTimeout(() => refreshDrafts(), 2000);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking for new emails:', error);
+      }
+    }, 60000); // Check every 60 seconds
+    
+    return () => clearInterval(interval);
+  }, [authReady]);
+
+  // Automatically fetch unread emails and generate AI drafts when dashboard loads
+  useEffect(() => {
+    console.log('🚀 Email processing useEffect triggered, authReady:', authReady, 'auth.currentUser:', !!auth.currentUser);
+    if (!authReady) {
+      console.log('⏳ Auth not ready yet, waiting...');
+      return;
+    }
+    
+    if (!auth.currentUser) {
+      console.log('⏳ No current user yet, waiting...');
+      return;
+    }
+    
+    console.log('✅ Auth ready and user exists, starting email processing...');
+    
+    const fetchUnreadEmailsAndGenerateDrafts = async () => {
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          const token = await user.getIdToken();
+          
+          // Test Gmail API first
+          console.log('🧪 Testing Gmail API...');
+          try {
+            const gmailTestRes = await fetch('/api/gmail/unread-inbox', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            console.log('🧪 Gmail test response status:', gmailTestRes.status);
+            if (gmailTestRes.ok) {
+              const gmailTestResult = await gmailTestRes.json();
+              console.log('🧪 Gmail test successful, found emails:', gmailTestResult.length);
+            } else {
+              const errorText = await gmailTestRes.text();
+              console.error('🧪 Gmail test failed:', errorText);
+            }
+          } catch (error) {
+            console.error('🧪 Gmail test error:', error);
+          }
+          
+          // Test Gemini API
+          console.log('🧪 Testing Gemini API...');
+          try {
+            const testRes = await fetch('/api/gemini/reply', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}` 
+              },
+              body: JSON.stringify({
+                body: 'Test email content',
+                tone: 'professional',
+                template: 'default',
+                clientName: 'Test Client'
+              })
+            });
+            console.log('🧪 Gemini test response status:', testRes.status);
+            if (testRes.ok) {
+              const testResult = await testRes.json();
+              console.log('🧪 Gemini test successful:', testResult);
+            } else {
+              const errorText = await testRes.text();
+              console.error('🧪 Gemini test failed:', errorText);
+            }
+          } catch (error) {
+            console.error('🧪 Gemini test error:', error);
+          }
+          
+          // Step 1: Fetch unread emails from Gmail
+          console.log('🔄 Fetching unread emails from Gmail...');
+          const unreadEmailsRes = await fetch('/api/gmail/unread-inbox', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          console.log(`📡 Gmail API response status:`, unreadEmailsRes.status);
+          
+          if (unreadEmailsRes.ok) {
+            const unreadEmails = await unreadEmailsRes.json();
+            console.log(`📧 Found ${unreadEmails.length} unread emails:`, unreadEmails.map((e: { subject?: string; from?: string }) => ({ subject: e.subject, from: e.from })));
+            
+            if (unreadEmails.length > 0) {
+              // Step 2: For each unread email, generate AI reply
+              for (const email of unreadEmails) {
+                try {
+                  console.log(`🤖 Generating AI reply for email: ${email.subject}`);
+                  
+                  // Generate AI reply using Gemini
+                  console.log(`🤖 Sending email to Gemini AI:`, {
+                    subject: email.subject,
+                    from: email.from,
+                    bodyLength: email.body?.length || 0
+                  });
+                  
+                  // Check if email body exists
+                  if (!email.body || email.body.trim().length === 0) {
+                    console.log('⚠️ Email body is empty, skipping AI processing');
+                    continue;
+                  }
+                  
+                  const aiReplyRes = await fetch('/api/gemini/reply', {
+                    method: 'POST',
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}` 
+                    },
+                    body: JSON.stringify({
+                      body: email.body,
+                      tone: 'professional',
+                      template: 'default',
+                      clientName: email.from.split('@')[0] || 'Client'
+                    })
+                  });
+                  
+                  console.log(`📡 Gemini API response status:`, aiReplyRes.status);
+                  
+                  if (aiReplyRes.ok) {
+                    const aiReply = await aiReplyRes.json();
+                    console.log('✅ AI reply generated successfully:', aiReply);
+                    
+                    // Step 3: Save AI draft to Firestore
+                    console.log('💾 Saving AI draft to database...');
+                    const saveDraftRes = await fetch('/api/ai-drafts', {
+                      method: 'POST',
+                      headers: { 
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}` 
+                      },
+                      body: JSON.stringify({
+                        projectId: 'general',
+                        subject: aiReply.subject || `Re: ${email.subject}`,
+                        body: aiReply.body,
+                        from: email.from,
+                        to: email.to,
+                        originalEmailId: email.id,
+                        status: 'draft'
+                      })
+                    });
+                    
+                    console.log(`💾 Save draft response status:`, saveDraftRes.status);
+                    
+                    if (saveDraftRes.ok) {
+                      const saveResult = await saveDraftRes.json();
+                      console.log('💾 AI draft saved to database:', saveResult);
+                    } else {
+                      const errorText = await saveDraftRes.text();
+                      console.error('❌ Failed to save AI draft:', errorText);
+                    }
+                  } else {
+                    const errorText = await aiReplyRes.text();
+                    console.error('❌ Gemini API failed:', errorText);
+                  }
+                } catch (error) {
+                  console.error('Error processing email:', error);
+                }
+              }
+              
+              // Step 4: Refresh drafts to show new AI-generated replies
+              setTimeout(() => {
+                refreshDrafts();
+                console.log('🔄 Refreshing AI drafts...');
+              }, 2000);
+            } else {
+              console.log('📧 No unread emails found');
+            }
+          } else {
+            const errorText = await unreadEmailsRes.text();
+            console.error('❌ Gmail API failed:', errorText);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch unread emails and generate drafts:', error);
+      }
+    };
+    
+    console.log('🎯 Calling fetchUnreadEmailsAndGenerateDrafts...');
+    fetchUnreadEmailsAndGenerateDrafts();
+    console.log('✅ fetchUnreadEmailsAndGenerateDrafts called');
+  }, [authReady]);
+
+  useEffect(() => {
+    console.log('📊 Main dashboard useEffect triggered, authReady:', authReady);
+    if (!authReady) {
+      console.log('⏳ Main dashboard: Auth not ready yet, waiting...');
+      return;
+    }
+    
+    console.log('✅ Main dashboard: Auth ready, starting API calls...');
     setLoadingSummary(true); setLoadingCalendar(true); setLoadingTodos(true); setLoadingDrafts(true);
+    
+
+    
     // Fetch actionable to-dos, AI drafts, and AI changes summary from backend
     console.log('Starting API calls for dashboard data...');
     Promise.all([
@@ -588,6 +879,11 @@ export default function DashboardClient() {
       fetchWithAuth<AiDraftsApiResponse>('/api/ai-drafts?status=draft&limit=10').catch((err): AiDraftsApiResponse => { console.log('AI drafts API error:', err); return { error: (err as Error).message || 'Failed to load AI drafts', drafts: [] }; }),
       fetchWithAuth<DashboardSummary>('/api/dashboard/summary').catch((err): DashboardSummary => { console.log('Dashboard summary API error:', err); return { error: (err as Error).message || 'Failed to load dashboard summary' }; })
     ]).then(([calendarData, todosData, aiDraftsData, summaryData]) => {
+      console.log('📊 All API calls completed successfully');
+      console.log('📅 Calendar data:', calendarData);
+      console.log('✅ Todos data:', todosData);
+      console.log('🤖 AI drafts data:', aiDraftsData);
+      console.log('📈 Summary data:', summaryData);
       let calendarEventsRaw: CalendarEvent[] = [];
       let todosRaw: Todo[] = [];
 
@@ -664,11 +960,14 @@ export default function DashboardClient() {
         }));
 
       // Process AI drafts data
+      console.log('🤖 Processing AI drafts data:', aiDraftsData);
       if (aiDraftsData.error) {
+        console.log('❌ AI drafts data has error:', aiDraftsData.error);
         setAiDraftsData({ drafts: [] });
         setLoadingDrafts(false);
       } else {
         const draftsData = aiDraftsData || { drafts: [] };
+        console.log('✅ AI drafts data processed successfully:', draftsData);
         setAiDraftsData({ drafts: draftsData.drafts || [] });
         setLoadingDrafts(false);
       }
@@ -698,13 +997,14 @@ export default function DashboardClient() {
       
       // Combine all tasks: backend todos, calendar events, and draft tasks
       setTodos([...todosRaw, ...calendarTodos, ...draftTasks]);
-    }).catch(() => {
+    }).catch((error) => {
+      console.error('❌ Error in main dashboard API calls:', error);
       setLoadingCalendar(false);
       setLoadingTodos(false);
       setLoadingDrafts(false);
       setLoadingSummary(false);
-      setCalendarError('Failed to load Google Calendar');
-      setToast('Google Calendar: Failed to load.');
+      setCalendarError('Failed to load dashboard data');
+      setToast('Dashboard: Failed to load data');
     });
   }, [authReady]);
 
@@ -1239,7 +1539,9 @@ export default function DashboardClient() {
                     <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '55%' }}></div>
                   </div>
                 ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
-                  <div className="text-blue-200 text-sm">No AI drafts ready for review.</div>
+                  <div className="text-blue-200 text-sm">
+                    <div>No AI drafts ready for review.</div>
+                  </div>
                 ) : (
                   <div className="text-blue-200 text-sm">
                     {aiDraftsData.drafts?.length || 0} AI draft{(aiDraftsData.drafts?.length || 0) !== 1 ? 's' : ''} ready for review
@@ -1272,31 +1574,6 @@ export default function DashboardClient() {
                 ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
                   <div className="text-blue-200 text-base">
                     <div className="mb-4">No AI drafts ready for review.</div>
-                    <button
-                      onClick={async () => {
-                        const user = auth.currentUser;
-                        if (!user) return;
-                        const token = await user.getIdToken();
-                        try {
-                          const res = await fetch('/api/email-monitor/status', {
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            console.log('Email monitoring status:', data);
-                            setToast(`Status: ${data.summary.emailSettingsCount} email settings, ${data.summary.clientFiltersCount} client filters, ${data.summary.processedEmailsCount} processed emails, ${data.summary.aiDraftsCount} AI drafts`);
-                          } else {
-                            setToast('Failed to get status');
-                          }
-                        } catch (err) {
-                          console.error('Failed to get status:', err);
-                          setToast('Error getting status');
-                        }
-                      }}
-                      className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs"
-                    >
-                      Check Status
-                    </button>
                   </div>
                 ) : (
                   <ul className="space-y-3 w-full max-h-60 overflow-y-auto">

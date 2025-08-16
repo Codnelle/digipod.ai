@@ -542,6 +542,50 @@ class APIService: ObservableObject {
         }
     }
     
+    // MARK: - Account Management
+    func deleteUserAccount(userId: String) async throws -> Bool {
+        let url = URL(string: "\(baseURL)/user/delete")!
+        print("🔍 Deleting user account for user: \(userId)")
+        
+        var request = try await createAuthenticatedRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        // Add user ID to request body
+        let requestBody = ["userId": userId]
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ Invalid response type")
+                throw APIError.networkError
+            }
+            
+            print("🔍 Delete account response status: \(httpResponse.statusCode)")
+            
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🔍 Response body: \(responseString)")
+            }
+            
+            if httpResponse.statusCode == 200 {
+                let response = try JSONDecoder().decode(DeleteAccountResponse.self, from: data)
+                print("✅ User account deleted successfully")
+                return response.success
+            } else if httpResponse.statusCode == 401 {
+                print("❌ Unauthorized - authentication failed")
+                throw APIError.authenticationFailed
+            } else {
+                print("❌ Delete account failed with status: \(httpResponse.statusCode)")
+                throw APIError.invalidResponse
+            }
+        } catch {
+            print("❌ Error deleting user account: \(error)")
+            throw error
+        }
+    }
+    
     // MARK: - Helper Methods
     func createAuthenticatedRequest(url: URL) async throws -> URLRequest {
         var request = URLRequest(url: url)
@@ -592,6 +636,11 @@ struct APIUser: Codable {
     let id: String
     let email: String
     let name: String?
+}
+
+struct DeleteAccountResponse: Codable {
+    let success: Bool
+    let message: String?
 }
 
 struct DashboardSummary: Codable {

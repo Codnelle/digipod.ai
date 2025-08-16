@@ -76,10 +76,10 @@ class EmailMonitorService {
     // Run initial check
     await this.checkAllEmails();
 
-    // Set up periodic checking (every 5 minutes)
+    // Set up periodic checking (every 30 minutes)
     this.checkInterval = setInterval(async () => {
       await this.checkAllEmails();
-    }, 5 * 60 * 1000);
+    }, 30 * 60 * 1000);
   }
 
   async stopMonitoring() {
@@ -152,26 +152,7 @@ class EmailMonitorService {
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // Automatically get all client emails from user's projects
-    const projectsSnap = await db.collection('projects')
-      .where('userId', '==', settings.userId)
-      .get();
-
-    const clientEmails = new Set<string>();
-    const projectMap = new Map<string, { id: string; name: string }>();
-
-    projectsSnap.docs.forEach(doc => {
-      const project = doc.data();
-      if (project.clientEmail) {
-        clientEmails.add(project.clientEmail.toLowerCase());
-        projectMap.set(project.clientEmail.toLowerCase(), {
-          id: doc.id,
-          name: project.name || 'Project'
-        });
-      }
-    });
-
-    console.log(`[emailMonitor] Monitoring ${clientEmails.size} client emails for user ${settings.userId}`);
+    console.log(`[emailMonitor] Processing ALL unread emails for user ${settings.userId} from ${settings.email}`);
 
     // Fetch recent emails (last 50)
     const res = await gmail.users.messages.list({
@@ -181,6 +162,7 @@ class EmailMonitorService {
     });
 
     const messages = res.data.messages || [];
+    console.log(`[emailMonitor] Found ${messages.length} unread Gmail messages`);
     
     for (const msg of messages) {
       try {
@@ -200,28 +182,23 @@ class EmailMonitorService {
           ? Buffer.from(bodyPart.body.data || '', 'base64').toString('utf-8')
           : '';
 
-        // Check if this email is from any of our monitored client emails
-        const senderEmail = this.extractEmailFromString(from);
-        const matchingProject = projectMap.get(senderEmail.toLowerCase());
+        console.log(`[emailMonitor] Processing email from: ${from}, subject: ${subject}`);
         
-        if (!matchingProject) {
-          continue; // Skip emails not from monitored clients
-        }
-
         // Check for duplicates
         const isDuplicate = await this.isEmailDuplicate(settings.userId, msg.id!);
         if (isDuplicate) {
+          console.log(`[emailMonitor] Skipping duplicate email ${msg.id}`);
           continue;
         }
 
-        // Process the email
+        // Process the email (no project filtering - process all emails)
         await this.processEmail(settings.userId, {
           gmailId: msg.id!,
           from,
           subject,
           body,
           date: new Date(date),
-          projectId: matchingProject.id
+          projectId: undefined // No specific project - this is a general email
         });
 
       } catch (error) {
@@ -247,26 +224,7 @@ class EmailMonitorService {
       await client.connect();
       const lock = await client.getMailboxLock('INBOX');
 
-      // Automatically get all client emails from user's projects
-      const projectsSnap = await db.collection('projects')
-        .where('userId', '==', settings.userId)
-        .get();
-
-      const clientEmails = new Set<string>();
-      const projectMap = new Map<string, { id: string; name: string }>();
-
-      projectsSnap.docs.forEach(doc => {
-        const project = doc.data();
-        if (project.clientEmail) {
-          clientEmails.add(project.clientEmail.toLowerCase());
-          projectMap.set(project.clientEmail.toLowerCase(), {
-            id: doc.id,
-            name: project.name || 'Project'
-          });
-        }
-      });
-
-      console.log(`[emailMonitor] Monitoring ${clientEmails.size} client emails for user ${settings.userId} (IMAP)`);
+      console.log(`[emailMonitor] Processing ALL unread emails for user ${settings.userId} (IMAP)`);
 
       // Fetch unread messages
       for await (const msg of client.fetch({
@@ -282,13 +240,7 @@ class EmailMonitorService {
           const subject = msg.envelope.subject || '';
           const body = msg.source?.toString() || '';
 
-          // Check if this email is from any of our monitored client emails
-          const senderEmail = this.extractEmailFromString(from);
-          const matchingProject = projectMap.get(senderEmail.toLowerCase());
-          
-          if (!matchingProject) {
-            continue;
-          }
+          console.log(`[emailMonitor] Processing IMAP email from: ${from}, subject: ${subject}`);
 
           // Check for duplicates
           const isDuplicate = await this.isEmailDuplicate(settings.userId, `imap_${msg.uid}`);
@@ -303,7 +255,7 @@ class EmailMonitorService {
             subject,
             body,
             date: msg.internalDate || new Date(),
-            projectId: matchingProject.id
+            projectId: undefined // No specific project - this is a general email
           });
 
         } catch (error) {
@@ -395,8 +347,9 @@ class EmailMonitorService {
       });
 
       // Store AI draft
-      await db.collection('aiDrafts').add({
-        projectId: emailData.projectId,
+      const aiDraftData = {
+        userId: userId, // Add missing userId field
+        projectId: emailData.projectId || 'general', // Use 'general' for emails without specific projects
         processedEmailId: processedEmailRef.id,
         subject: geminiRes.subject || `Re: ${emailData.subject}`,
         body: geminiRes.body,
@@ -404,7 +357,12 @@ class EmailMonitorService {
         signature: geminiRes.signature,
         status: 'draft',
         createdAt: new Date()
-      });
+      };
+      
+      console.log(`[emailMonitor] Storing AI draft:`, aiDraftData);
+      
+      const aiDraftRef = await db.collection('aiDrafts').add(aiDraftData);
+      console.log(`[emailMonitor] AI draft stored with ID: ${aiDraftRef.id}`);
 
       // Send push for new AI draft
       await sendPushToUser({
@@ -417,6 +375,7 @@ class EmailMonitorService {
           description: geminiRes.subject || emailData.subject || 'AI draft',
         },
         silent: false,
+        category: 'EMAIL_NOTIFICATION',
       });
 
       // Extract todos
@@ -444,6 +403,7 @@ class EmailMonitorService {
             description: todos.length === 1 ? todos[0].task : `${todos.length} todos`,
           },
           silent: false,
+          category: 'PROJECT_NOTIFICATION',
         });
       }
 
@@ -463,13 +423,23 @@ class EmailMonitorService {
 
   // Public methods for manual operations
   async checkUserEmailsManually(userId: string) {
+    console.log(`[emailMonitor] Looking for active email settings for user ${userId}`);
+    
     const settingsSnap = await db.collection('emailSettings')
       .where('userId', '==', userId)
       .where('isActive', '==', true)
       .get();
 
+    console.log(`[emailMonitor] Found ${settingsSnap.docs.length} active email settings for user ${userId}`);
+
+    if (settingsSnap.docs.length === 0) {
+      console.log(`[emailMonitor] No active email settings found for user ${userId}. User may need to connect Gmail first.`);
+      return;
+    }
+
     for (const settingDoc of settingsSnap.docs) {
       const settings = settingDoc.data() as EmailSettings;
+      console.log(`[emailMonitor] Processing email settings for: ${settings.email} (${settings.provider})`);
       await this.checkUserEmails(settings);
     }
   }
@@ -477,8 +447,54 @@ class EmailMonitorService {
   // Manual check for a specific user (for testing)
   async checkUserEmailsNow(userId: string) {
     console.log(`[emailMonitor] Manual email check requested for user ${userId}`);
+    
+    // First, check if user has email settings, if not, try to create them
+    const settingsSnap = await db.collection('emailSettings')
+      .where('userId', '==', userId)
+      .where('isActive', '==', true)
+      .get();
+
+    if (settingsSnap.docs.length === 0) {
+      console.log(`[emailMonitor] No email settings found for user ${userId}, attempting to create from existing Gmail connection...`);
+      await this.createEmailSettingsFromGmail(userId);
+    }
+
     await this.checkUserEmailsManually(userId);
     console.log(`[emailMonitor] Manual email check completed for user ${userId}`);
+  }
+
+  // Create email settings from existing Gmail connection
+  private async createEmailSettingsFromGmail(userId: string) {
+    try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
+        console.log(`[emailMonitor] User document not found for ${userId}`);
+        return;
+      }
+
+      const userData = userDoc.data();
+      if (!userData?.gmailToken) {
+        console.log(`[emailMonitor] No Gmail token found for user ${userId}`);
+        return;
+      }
+
+      // Create email settings
+      const emailSettingsRef = db.collection('emailSettings').doc(userId);
+      await emailSettingsRef.set({
+        userId: userId,
+        provider: 'gmail',
+        email: userData.email || 'unknown@email.com',
+        gmailToken: userData.gmailToken,
+        isActive: true,
+        checkInterval: 30, // Check every 30 minutes
+        lastChecked: new Date(),
+        createdAt: new Date()
+      }, { merge: true });
+
+      console.log(`[emailMonitor] Email settings created for user ${userId} from existing Gmail connection`);
+    } catch (error) {
+      console.error(`[emailMonitor] Error creating email settings for user ${userId}:`, error);
+    }
   }
 
   async getProcessingStatus(userId: string) {

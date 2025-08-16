@@ -45,16 +45,48 @@ export async function GET(request: NextRequest) {
     }));
 
     // Get AI drafts
-    const aiDraftsSnap = await db.collection('aiDrafts')
-      .where('status', '==', 'draft')
-      .orderBy('createdAt', 'desc')
-      .limit(10)
-      .get();
+    // First get processed emails for this user to filter drafts
+    const processedEmailIds = processedEmails.map(email => email.id);
+    
+    // If no processed emails, return empty array for drafts
+    let aiDrafts: any[] = [];
+    
+    if (processedEmailIds.length > 0) {
+      // Firestore has a limit of 10 items for 'in' queries, so we need to handle this in batches if needed
+      const batchSize = 10;
+      const allDrafts: FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>[] = [];
+      
+      // Process in batches of 10
+      for (let i = 0; i < processedEmailIds.length && i < batchSize; i += batchSize) {
+        const batch = processedEmailIds.slice(i, i + batchSize);
+        
+        // Create a new query for each batch that includes the processedEmailId filter
+        const batchQuery = db.collection('aiDrafts')
+          .where('processedEmailId', 'in', batch)
+          .where('status', '==', 'draft')
+          .orderBy('createdAt', 'desc');
+        
+        const batchSnap = await batchQuery.get();
+        allDrafts.push(...batchSnap.docs);
+      }
+      
+      // Sort all drafts by createdAt
+      allDrafts.sort((a, b) => {
+        const dateA = a.data().createdAt instanceof Date ? a.data().createdAt : a.data().createdAt?.toDate?.() || new Date();
+        const dateB = b.data().createdAt instanceof Date ? b.data().createdAt : b.data().createdAt?.toDate?.() || new Date();
+        return dateB.getTime() - dateA.getTime(); // Most recent first
+      });
+      
+      // Limit to 10 drafts
+      const aiDraftsSnap = allDrafts.slice(0, 10);
+      
+      aiDrafts = aiDraftsSnap.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+    }
 
-    const aiDrafts = aiDraftsSnap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    // aiDrafts is already defined and populated above
 
     return NextResponse.json({
       success: true,
@@ -75,4 +107,4 @@ export async function GET(request: NextRequest) {
       error: 'Failed to get email monitoring status' 
     }, { status: 500 });
   }
-} 
+}
