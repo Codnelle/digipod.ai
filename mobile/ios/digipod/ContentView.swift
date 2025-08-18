@@ -71,15 +71,15 @@ struct AuthView: View {
                 VStack(spacing: 20) {
                     TextField("Email", text: $authViewModel.email)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .foregroundColor(.black)
-                        .background(.white)
+                        .foregroundColor(.gray)
+                       
                         .keyboardType(.emailAddress)
                         .autocapitalization(.none)
                     
                     SecureField("Password", text: $authViewModel.password)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .foregroundColor(.black)
-                        .background(.white)
+                        .foregroundColor(.gray)
+                  
                     
                     if let error = authViewModel.error {
                         Text(error)

@@ -23,8 +23,8 @@ export default function LandingPage() {
     }
     const options = {
       key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
-      amount: 40000,
-      currency: "INR",
+      amount: 500, // $5.00 in cents/paise equivalent
+      currency: "USD",
       name: "Digipod",
       description: "Early Access - Founders Deal",
       handler: async function (response: unknown) {
@@ -245,7 +245,7 @@ export default function LandingPage() {
         <div className="bg-gradient-to-br from-[#2d186a] to-[#3a1c8d] rounded-3xl p-12 flex flex-col items-center shadow-2xl max-w-md w-full border border-[#3a1c8d] animate-fade-in">
           <span className="mb-4 text-base font-extrabold uppercase tracking-wider text-white bg-gradient-to-r from-[#FFD600] to-[#6c4ad6] px-6 py-2 rounded-full shadow-lg transition-transform transform hover:scale-105 animate-pulse">Limited time offer</span>
           <h3 className="text-2xl font-bold mb-2 text-[#FFD600]">Early Access</h3>
-          <p className="text-5xl font-extrabold mb-4"><span className="text-[#FFD600]">INR 400</span> <span className="text-lg line-through text-[#a18fff] ml-2">INR 3500</span></p>
+          <p className="text-5xl font-extrabold mb-4"><span className="text-[#FFD600]">$5</span></p>
           <ul className="text-[#e0d6ff] text-lg mb-8 space-y-3">
             <li>✔️ Get Early Access + 3 Months Free</li>
             <li>✔️ Lifetime Discount Post Launch</li>

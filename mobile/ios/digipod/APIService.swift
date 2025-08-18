@@ -5,6 +5,25 @@ import FirebaseAuth
 import UIKit
 #endif
     
+// Helper: JSONDecoder that supports ISO8601 with fractional seconds
+private func makeISO8601Decoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .custom { decoder -> Date in
+        let container = try decoder.singleValueContainer()
+        let dateString = try container.decode(String.self)
+        // Try with fractional seconds first
+        let fmtWithFraction = ISO8601DateFormatter()
+        fmtWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fmtWithFraction.date(from: dateString) { return date }
+        // Fallback: without fractional seconds
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime]
+        if let date = fmt.date(from: dateString) { return date }
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Expected ISO8601 date (with or without fractional seconds)", underlyingError: nil))
+    }
+    return decoder
+}
+    
 // MARK: - API Service
 class APIService: ObservableObject {
     private let baseURL = "https://app.digipod.tech/api"
@@ -127,15 +146,13 @@ class APIService: ObservableObject {
             if httpResponse.statusCode == 200 {
                 // Try to decode as array first
                 do {
-                    let decoder = JSONDecoder()
-                    decoder.dateDecodingStrategy = .iso8601
+                    let decoder = makeISO8601Decoder()
                     let drafts = try decoder.decode([AIDraft].self, from: data)
                     print("✅ Successfully decoded AI drafts as array: \(drafts.count)")
                     return drafts
                 } catch {
                     print("❌ Failed to decode as array, trying as object with drafts property")
-                    let decoder = JSONDecoder()
-                    decoder.dateDecodingStrategy = .iso8601
+                    let decoder = makeISO8601Decoder()
                     let response = try decoder.decode(AIDraftsResponse.self, from: data)
                     print("✅ Successfully decoded AI drafts from object: \(response.drafts.count)")
                     return response.drafts
