@@ -7,16 +7,24 @@ import { FolderIcon, EllipsisVerticalIcon, ChevronDownIcon, ArrowPathIcon } from
 import AntiHustleMeter from '@/components/AntiHustleMeter';
 import useSWR from 'swr';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { CalendarDaysIcon, EnvelopeOpenIcon, EnvelopeIcon, CheckCircleIcon } from '@heroicons/react/24/solid';
+import { CalendarDaysIcon, EnvelopeOpenIcon, CheckCircleIcon } from '@heroicons/react/24/solid';
 import './calendar-dashboard.css'; // Custom styles for react-big-calendar
 import { Calendar as BigCalendar, dateFnsLocalizer } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
-import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 import { incrementMinutesSaved } from '../../lib/hustleMeter';
 // Restore this import:
 import { SparklesIcon } from '@heroicons/react/24/solid';
+import AppTour from '@/components/AppTour';
+
+// Extend Window typing for hasImap flag set by sidebar
+declare global {
+  interface Window { hasImap?: boolean }
+}
+
+// Global variable for IMAP availability
+const hasImapFlag = typeof window !== 'undefined' && Boolean(window.hasImap);
 
 console.log('Firebase config (dashboard):', auth.app.options);
 
@@ -275,7 +283,7 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
         </div>
         </div>
       </div>
-      {(!isMailboxAvailable && !(typeof window !== 'undefined' && (window as any).hasImap)) ? (
+      {(!isMailboxAvailable && !hasImapFlag) ? (
         <div className="w-full flex flex-col items-center justify-center">
             <p className="text-white text-lg mb-4">Please connect a mailbox to use this feature.</p>
         </div>
@@ -1187,6 +1195,37 @@ export default function DashboardClient() {
     }
   }, []);
 
+  const [showTour, setShowTour] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const done = localStorage.getItem('digipod-tour-complete') === '1';
+    if (!done) setShowTour(true);
+  }, []);
+
+  const tourSteps = [
+    {
+      id: 'connect-mail',
+      title: 'Connect your mailbox',
+      description: 'Link Gmail or your custom IMAP/SMTP inbox. Digipod reads only what it needs to draft and manage replies securely.'
+    },
+    {
+      id: 'ai-drafts',
+      title: 'Let AI draft replies',
+      description: 'New emails are triaged and AI prepares smart replies. Review, edit, and send in one click.'
+    },
+    {
+      id: 'todos',
+      title: 'Auto to-dos and nudges',
+      description: 'We extract action items from emails and keep your projects moving with timely nudges.'
+    },
+    {
+      id: 'dashboard',
+      title: 'Your anti-hustle dashboard',
+      description: 'See summaries, drafts, and tasks at a glance. Spend less time in inbox, more on your craft.'
+    }
+  ];
+
   if (authChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -1211,6 +1250,7 @@ export default function DashboardClient() {
 
   return (
     <main className="flex-1 flex flex-col min-h-screen bg-gradient-to-r from-gray-900 to-gray-900 relative overflow-x-hidden">
+      <AppTour open={showTour} steps={tourSteps} onClose={() => setShowTour(false)} />
       {/* Animated shimmer overlay */}
       <div className="pointer-events-none fixed inset-0 z-0 animate-shimmer bg-gradient-to-r from-transparent via-white/10" style={{ backgroundSize: '200% 100%' }} />
       {/* Hero Header */}
@@ -1222,10 +1262,13 @@ export default function DashboardClient() {
               <p className="text-lg text-gray-300 font-medium">Welcome back, creative rebel. Your anti-hustle HQ awaits.</p>
             </div>
             <div className="flex-1 flex justify-center items-center">
-              {/* Floating Pip Avatar */}
-              {/* <div className="animate-float drop-shadow-xl">
-                <PipAvatar minutesSaved={minutesSaved} focusMode={focusMode} />
-              </div> */}
+              <button
+                className="px-3 py-1 rounded-md border border-blue-700 text-blue-200 bg-blue-900/30 hover:bg-blue-900/50 text-xs"
+                onClick={() => setShowTour(true)}
+                type="button"
+              >
+                Take a quick tour
+              </button>
             </div>
             <div className="flex-1 flex justify-end items-center gap-4">
               <AntiHustleMeter minutesSaved={minutesSaved} />
@@ -1343,8 +1386,7 @@ export default function DashboardClient() {
               }
               loading={loadingSummary}
               gradientClass="bg-gradient-to-b from-cyan-800 to-fuchsia-800"
-              isMailboxAvailable={isGmailConnected || hasImap}
-              onRefresh={refreshSummary}
+              isMailboxAvailable={isGmailConnected || hasImapFlag}
             />
           </div>
           {/* Upcoming To-Dos Card */}
@@ -1437,7 +1479,7 @@ export default function DashboardClient() {
               }
               loading={loadingTodos}
               gradientClass="from-green-800/40 to-green-900/20"
-              isMailboxAvailable={isGmailConnected || hasImap}
+              isMailboxAvailable={isGmailConnected || hasImapFlag}
               onRefresh={refreshTodos}
             />
           </div>
@@ -1510,7 +1552,7 @@ export default function DashboardClient() {
               }
               loading={loadingDrafts}
               gradientClass="from-purple-800/40 to-purple-900/20"
-              isMailboxAvailable={isGmailConnected || hasImap}
+              isMailboxAvailable={isGmailConnected || hasImapFlag}
               onRefresh={refreshDrafts}
             />
           </div>
