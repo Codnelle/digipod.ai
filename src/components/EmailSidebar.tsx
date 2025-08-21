@@ -64,6 +64,7 @@ interface GmailUser {
 declare global {
   interface Window {
     gmailConnected?: boolean;
+    hasImap?: boolean;
   }
 }
 
@@ -82,6 +83,8 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
     username: '',
     password: '',
   });
+  const [selectedProvider, setSelectedProvider] = useState<'custom' | 'titan' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'zoho' | 'fastmail' | 'gmx' | 'maildotcom' | 'yandex' | 'aol' | 'godaddy' | 'namecheap' | 'rackspace' | 'proton-bridge'>('custom');
+  const [showPassword, setShowPassword] = useState(false);
   const [imapStatus, setImapStatus] = useState<'idle'|'connecting'|'success'|'error'>('idle');
   const [imapError, setImapError] = useState<string|null>(null);
   const [focusMode, setFocusMode] = useState(false);
@@ -160,10 +163,6 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
 
   // Remove Gmail mailbox logic from mailboxes
   const gmailConnected = gmailUser?.gmailConnected;
-  // Expose gmailConnected globally for other components/pages
-  if (typeof window !== 'undefined') {
-    window.gmailConnected = gmailConnected;
-  }
   const gmailAccount = gmailConnected ? {
     id: 'gmail-oauth',
     email: gmailUser!.email,
@@ -171,10 +170,17 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
     status: 'connected',
   } : null;
   const otherAccounts = mailboxes.filter((mb: Mailbox) => mb.provider !== 'gmail');
+  const hasImap = otherAccounts.length > 0;
+
+  // Expose gmailConnected globally for other components/pages
+  if (typeof window !== 'undefined') {
+    window.gmailConnected = gmailConnected;
+    window.hasImap = hasImap;
+  }
 
   // Helper to update popup position
   const updatePopupPos = React.useCallback(() => {
-    if (!gmailConnected && !collapsed && connectGmailBtnRef.current) {
+    if (!gmailConnected && !hasImap && !collapsed && connectGmailBtnRef.current) {
       const rect = connectGmailBtnRef.current.getBoundingClientRect();
       setPopupPos({
         top: rect.top + 2,
@@ -183,7 +189,7 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
     } else {
       setPopupPos(null);
     }
-  }, [gmailConnected, collapsed]);
+  }, [gmailConnected, hasImap, collapsed]);
 
   // Update on mount, scroll, resize, and dependency change
   useEffect(() => {
@@ -200,20 +206,130 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
 
   const handleImapChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
-    setImapForm(f => ({ ...f, [name]: type === 'checkbox' ? checked : value }));
+    setImapForm(f => {
+      const next = { ...f, [name]: type === 'checkbox' ? checked : value } as typeof f;
+      if (name === 'email') {
+        const trimmed = (value || '').trim();
+        // If username is empty or was equal to previous email, keep it in sync
+        if (!f.username || f.username === f.email) {
+          next.username = trimmed;
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const provider = e.target.value as typeof selectedProvider;
+    setSelectedProvider(provider);
+    const fill = (imapHost: string, imapPort: number, imapSecure: boolean, smtpHost: string, smtpPort: number, smtpSecure: boolean) => {
+      setImapForm(f => ({
+        ...f,
+        imapHost,
+        imapPort,
+        imapSecure,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+        username: f.username || f.email,
+      }));
+    };
+    switch (provider) {
+      case 'titan':
+        fill('imap.titan.email', 993, true, 'smtp.titan.email', 465, true);
+        break;
+      case 'gmail':
+        fill('imap.gmail.com', 993, true, 'smtp.gmail.com', 465, true);
+        break;
+      case 'outlook':
+        fill('outlook.office365.com', 993, true, 'smtp.office365.com', 587, false);
+        break;
+      case 'yahoo':
+        fill('imap.mail.yahoo.com', 993, true, 'smtp.mail.yahoo.com', 465, true);
+        break;
+      case 'icloud':
+        fill('imap.mail.me.com', 993, true, 'smtp.mail.me.com', 587, false);
+        break;
+      case 'zoho':
+        fill('imap.zoho.com', 993, true, 'smtp.zoho.com', 465, true);
+        break;
+      case 'fastmail':
+        fill('imap.fastmail.com', 993, true, 'smtp.fastmail.com', 465, true);
+        break;
+      case 'gmx':
+        fill('imap.gmx.com', 993, true, 'mail.gmx.com', 587, false);
+        break;
+      case 'maildotcom':
+        fill('imap.mail.com', 993, true, 'smtp.mail.com', 587, false);
+        break;
+      case 'yandex':
+        fill('imap.yandex.com', 993, true, 'smtp.yandex.com', 465, true);
+        break;
+      case 'aol':
+        fill('imap.aol.com', 993, true, 'smtp.aol.com', 465, true);
+        break;
+      case 'godaddy':
+        fill('imap.secureserver.net', 993, true, 'smtpout.secureserver.net', 465, true);
+        break;
+      case 'namecheap':
+        fill('imap.privateemail.com', 993, true, 'smtp.privateemail.com', 465, true);
+        break;
+      case 'rackspace':
+        fill('secure.emailsrvr.com', 993, true, 'secure.emailsrvr.com', 465, true);
+        break;
+      case 'proton-bridge':
+        // Proton Bridge runs locally; users must copy host/ports from their Bridge app
+        fill('127.0.0.1', 1143, false, '127.0.0.1', 1025, false);
+        break;
+      case 'custom':
+      default:
+        // Do not change existing values
+        break;
+    }
+  };
+
+  const validateImapInputs = (): string | null => {
+    const portImap = Number(imapForm.imapPort);
+    const portSmtp = Number(imapForm.smtpPort);
+    if (!imapForm.email) return 'Email is required';
+    if (!imapForm.imapHost) return 'IMAP host is required';
+    if (!portImap) return 'Valid IMAP port is required';
+    if (!imapForm.smtpHost) return 'SMTP host is required';
+    if (!portSmtp) return 'Valid SMTP port is required';
+    if (!imapForm.username) return 'Username is required';
+    if (!imapForm.password) return 'Password is required';
+    if (portImap === 993 && !imapForm.imapSecure) return 'IMAP 993 requires SSL/TLS enabled';
+    if (portImap === 143 && imapForm.imapSecure) return 'IMAP 143 typically uses STARTTLS (disable SSL/TLS)';
+    if (portSmtp === 465 && !imapForm.smtpSecure) return 'SMTP 465 requires SSL/TLS enabled';
+    if (portSmtp === 587 && imapForm.smtpSecure) return 'SMTP 587 typically uses STARTTLS (disable SSL/TLS)';
+    return null;
   };
 
   const handleImapConnect = async (e: React.FormEvent) => {
     e.preventDefault();
     setImapStatus('connecting');
     setImapError(null);
+    const validationError = validateImapInputs();
+    if (validationError) {
+      setImapStatus('error');
+      setImapError(validationError);
+      return;
+    }
     try {
-      // TODO: Replace with real userId
-      const userId = 'demo-user';
+      const user = auth.currentUser;
+      if (!user) {
+        setImapStatus('error');
+        setImapError('Please sign in first');
+        return;
+      }
+      const token = await user.getIdToken();
       const res = await fetch('/api/mailbox/connect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...imapForm, userId }),
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ...imapForm }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -223,6 +339,7 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
           email: '', imapHost: '', imapPort: 993, imapSecure: true,
           smtpHost: '', smtpPort: 465, smtpSecure: true, username: '', password: '',
         });
+        setSelectedProvider('custom');
         refresh();
       } else {
         setImapStatus('error');
@@ -442,8 +559,10 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
           {!gmailConnected && (
             <div className="relative w-full flex flex-col items-center">
               <button
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg ${collapsed ? 'justify-center' : ''} ${otherAccounts.length === 0 ? 'bg-blue-500 hover:bg-blue-600 text-white font-semibold transition text-sm w-full shadow-lg animate-pulse' : 'bg-gray-800 hover:bg-gray-700 text-blue-300 font-semibold transition text-sm w-full'}`}
-                onClick={handleGoogleConnect}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg ${collapsed ? 'justify-center' : ''} ${otherAccounts.length === 0 ? 'bg-blue-500 hover:bg-blue-600 text-white font-semibold transition text-sm w-full shadow-lg animate-pulse' : 'bg-gray-800 text-blue-300 font-semibold transition text-sm w-full cursor-not-allowed opacity-50'}`}
+                onClick={() => { if (!hasImap) handleGoogleConnect(); }}
+                disabled={hasImap}
+                title={hasImap ? 'Disconnect other mailbox to connect Google' : undefined}
               >
                 <EnvelopeIcon className="h-5 w-5" />
                 {!collapsed && 'Connect Google'}
@@ -452,8 +571,10 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
           )}
           {/* Connect Other button always visible */}
           <button
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-900 hover:bg-gray-700 text-blue-200 font-semibold transition text-sm mt-1 w-full ${collapsed ? 'justify-center' : ''} bg-gray-800`}
-            onClick={() => setShowImapModal(true)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-900 ${gmailConnected ? 'text-blue-200 opacity-50 cursor-not-allowed' : 'hover:bg-gray-700 text-blue-200'} font-semibold transition text-sm mt-1 w-full ${collapsed ? 'justify-center' : ''} bg-gray-800`}
+            onClick={() => { if (!gmailConnected) setShowImapModal(true); }}
+            disabled={gmailConnected}
+            title={gmailConnected ? 'Disconnect Google to connect another mailbox' : undefined}
           >
             <ServerStackIcon className="h-5 w-5" />
             {!collapsed && 'Connect Other'}
@@ -537,6 +658,31 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
             </button>
             <div className="font-bold text-lg mb-4 flex items-center gap-2 text-blue-200"><ServerStackIcon className="h-6 w-6 text-blue-300" /> Connect Other Email (IMAP/SMTP)</div>
             <form onSubmit={handleImapConnect} className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 gap-2">
+                <label className="text-xs text-gray-300">Provider preset</label>
+                <select
+                  className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none bg-gray-100 text-black border-gray-700"
+                  value={selectedProvider}
+                  onChange={handleProviderChange}
+                >
+                  <option value="custom">Custom</option>
+                  <option value="titan">Titan (Zoho Mail / Flockmail)</option>
+                  <option value="gmail">Gmail (IMAP/SMTP)</option>
+                  <option value="outlook">Microsoft 365 / Outlook</option>
+                  <option value="yahoo">Yahoo Mail</option>
+                  <option value="icloud">iCloud Mail</option>
+                  <option value="zoho">Zoho Mail</option>
+                  <option value="fastmail">Fastmail</option>
+                  <option value="gmx">GMX</option>
+                  <option value="maildotcom">Mail.com</option>
+                  <option value="yandex">Yandex</option>
+                  <option value="aol">AOL Mail</option>
+                  <option value="godaddy">GoDaddy (Workspace)</option>
+                  <option value="namecheap">Namecheap Private Email</option>
+                  <option value="rackspace">Rackspace Email</option>
+                  <option value="proton-bridge">Proton (via Bridge)</option>
+                </select>
+              </div>
               <input className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="email" placeholder="Email address" value={imapForm.email} onChange={handleImapChange} required />
               <input className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="username" placeholder="Username (if different)" value={imapForm.username} onChange={handleImapChange} />
               <input className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="imapHost" placeholder="IMAP host (e.g. imap.yourdomain.com)" value={imapForm.imapHost} onChange={handleImapChange} required />
@@ -545,7 +691,10 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
               <input className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="smtpHost" placeholder="SMTP host (e.g. smtp.yourdomain.com)" value={imapForm.smtpHost} onChange={handleImapChange} required />
               <input className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="smtpPort" type="number" placeholder="SMTP port (465)" value={imapForm.smtpPort} onChange={handleImapChange} required />
               <label className="flex items-center gap-2 text-xs text-gray-300"><input type="checkbox" name="smtpSecure" checked={imapForm.smtpSecure} onChange={handleImapChange} /> SMTP SSL/TLS</label>
-              <input className="border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="password" type="password" placeholder="Password or App Password" value={imapForm.password} onChange={handleImapChange} required />
+              <div className="flex items-center gap-2">
+                <input className="flex-1 border px-3 py-2 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 focus:outline-none placeholder-gray-400 text-black bg-gray-100 border-gray-700" name="password" type={showPassword ? 'text' : 'password'} placeholder="Password or App Password" value={imapForm.password} onChange={handleImapChange} required />
+                <button type="button" className="px-2 py-2 text-xs rounded-lg bg-gray-800 text-gray-200 border border-gray-700 hover:bg-gray-700" onClick={() => setShowPassword(v => !v)}>{showPassword ? 'Hide' : 'Show'}</button>
+              </div>
               <button type="submit" className="bg-blue-800 hover:bg-blue-900 text-white px-4 py-2 rounded-lg font-semibold shadow-sm disabled:opacity-50" disabled={imapStatus === 'connecting'}>
                 {imapStatus === 'connecting' ? 'Connecting...' : imapStatus === 'success' ? 'Connected!' : 'Connect'}
               </button>
@@ -556,7 +705,7 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
         </div>
       )}
       {/* Overlay popup outside sidebar */}
-      {(!gmailConnected && !collapsed && popupPos && typeof window !== 'undefined') && ReactDOM.createPortal(
+      {(!gmailConnected && !hasImap && !collapsed && popupPos && typeof window !== 'undefined') && ReactDOM.createPortal(
         <div
           style={{
             position: 'fixed',

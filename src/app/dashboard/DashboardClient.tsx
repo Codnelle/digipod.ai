@@ -7,7 +7,7 @@ import { FolderIcon, EllipsisVerticalIcon, ChevronDownIcon, ArrowPathIcon } from
 import AntiHustleMeter from '@/components/AntiHustleMeter';
 import useSWR from 'swr';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { CalendarDaysIcon, EnvelopeOpenIcon } from '@heroicons/react/24/solid';
+import { CalendarDaysIcon, EnvelopeOpenIcon, EnvelopeIcon, CheckCircleIcon } from '@heroicons/react/24/solid';
 import './calendar-dashboard.css'; // Custom styles for react-big-calendar
 import { Calendar as BigCalendar, dateFnsLocalizer } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -218,16 +218,16 @@ function ProjectCard({ project, onDelete, onEdit }: { project: Project, onDelete
   );
 }
 
-function ExpandableCard({ expanded, onClick, title, icon, summary, content, loading, gradientClass, isGmailConnected, onRefresh }: {
+function ExpandableCard({ expanded, onClick, title, icon, summary, content, loading, gradientClass, isMailboxAvailable, onRefresh }: {
   expanded: boolean;
   onClick: () => void;
-  title: React.ReactNode;
+  title: string;
   icon: React.ReactNode;
   summary: React.ReactNode;
   content: React.ReactNode;
   loading: boolean;
   gradientClass: string;
-  isGmailConnected: boolean;
+  isMailboxAvailable: boolean;
   onRefresh?: () => void;
 }) {
   return (
@@ -275,9 +275,9 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
         </div>
         </div>
       </div>
-      {!isGmailConnected ? (
+      {(!isMailboxAvailable && !(typeof window !== 'undefined' && (window as any).hasImap)) ? (
         <div className="w-full flex flex-col items-center justify-center">
-            <p className="text-white text-lg mb-4">Please connect your Gmail account to use this feature.</p>
+            <p className="text-white text-lg mb-4">Please connect a mailbox to use this feature.</p>
         </div>
       ) : loading ? (
         <div className="w-full space-y-3">
@@ -606,6 +606,7 @@ export default function DashboardClient() {
   // Periodically refresh AI drafts and check for new unread emails
   useEffect(() => {
     if (!authReady) return;
+    if (!isGmailConnected) return;
     
     const interval = setInterval(async () => {
       // Refresh drafts
@@ -616,7 +617,7 @@ export default function DashboardClient() {
         const user = auth.currentUser;
         if (user) {
           const token = await user.getIdToken();
-          const unreadEmailsRes = await fetch('/api/gmail/unread-inbox', {
+          const unreadEmailsRes = await fetch('/api/mailbox/unread-inbox', {
             headers: { Authorization: `Bearer ${token}` }
           });
           
@@ -679,7 +680,7 @@ export default function DashboardClient() {
     }, 60000); // Check every 60 seconds
     
     return () => clearInterval(interval);
-  }, [authReady]);
+  }, [authReady, isGmailConnected]);
 
   // Automatically fetch unread emails and generate AI drafts when dashboard loads
   useEffect(() => {
@@ -693,6 +694,11 @@ export default function DashboardClient() {
       console.log('⏳ No current user yet, waiting...');
       return;
     }
+
+    if (!isGmailConnected) {
+      console.log('⏭️ Gmail not connected, skipping Gmail unread polling.');
+      return;
+    }
     
     console.log('✅ Auth ready and user exists, starting email processing...');
     
@@ -703,21 +709,23 @@ export default function DashboardClient() {
           const token = await user.getIdToken();
           
           // Test Gmail API first
-          console.log('🧪 Testing Gmail API...');
-          try {
-            const gmailTestRes = await fetch('/api/gmail/unread-inbox', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            console.log('🧪 Gmail test response status:', gmailTestRes.status);
-            if (gmailTestRes.ok) {
-              const gmailTestResult = await gmailTestRes.json();
-              console.log('🧪 Gmail test successful, found emails:', gmailTestResult.length);
-            } else {
-              const errorText = await gmailTestRes.text();
-              console.error('🧪 Gmail test failed:', errorText);
+          if (isGmailConnected) {
+            console.log('🧪 Testing Gmail API...');
+            try {
+              const gmailTestRes = await fetch('/api/gmail/unread-inbox', {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              console.log('🧪 Gmail test response status:', gmailTestRes.status);
+              if (gmailTestRes.ok) {
+                const gmailTestResult = await gmailTestRes.json();
+                console.log('🧪 Gmail test successful, found emails:', gmailTestResult.length);
+              } else {
+                const errorText = await gmailTestRes.text();
+                console.error('🧪 Gmail test failed:', errorText);
+              }
+            } catch (error) {
+              console.error('🧪 Gmail test error:', error);
             }
-          } catch (error) {
-            console.error('🧪 Gmail test error:', error);
           }
           
           // Test Gemini API
@@ -749,8 +757,8 @@ export default function DashboardClient() {
           }
           
           // Step 1: Fetch unread emails from Gmail
-          console.log('🔄 Fetching unread emails from Gmail...');
-          const unreadEmailsRes = await fetch('/api/gmail/unread-inbox', {
+          console.log('🔄 Fetching unread emails...');
+          const unreadEmailsRes = await fetch('/api/mailbox/unread-inbox', {
             headers: { Authorization: `Bearer ${token}` }
           });
           
@@ -798,66 +806,22 @@ export default function DashboardClient() {
                   if (aiReplyRes.ok) {
                     const aiReply = await aiReplyRes.json();
                     console.log('✅ AI reply generated successfully:', aiReply);
-                    
-                    // Step 3: Save AI draft to Firestore
-                    console.log('💾 Saving AI draft to database...');
-                    const saveDraftRes = await fetch('/api/ai-drafts', {
-                      method: 'POST',
-                      headers: { 
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${token}` 
-                      },
-                      body: JSON.stringify({
-                        projectId: 'general',
-                        subject: aiReply.subject || `Re: ${email.subject}`,
-                        body: aiReply.body,
-                        from: email.from,
-                        to: email.to,
-                        originalEmailId: email.id,
-                        status: 'draft'
-                      })
-                    });
-                    
-                    console.log(`💾 Save draft response status:`, saveDraftRes.status);
-                    
-                    if (saveDraftRes.ok) {
-                      const saveResult = await saveDraftRes.json();
-                      console.log('💾 AI draft saved to database:', saveResult);
-                    } else {
-                      const errorText = await saveDraftRes.text();
-                      console.error('❌ Failed to save AI draft:', errorText);
-                    }
-                  } else {
-                    const errorText = await aiReplyRes.text();
-                    console.error('❌ Gemini API failed:', errorText);
+                    // Additional handling can go here
                   }
                 } catch (error) {
-                  console.error('Error processing email:', error);
+                  console.error('Error generating AI reply:', error);
                 }
               }
-              
-              // Step 4: Refresh drafts to show new AI-generated replies
-              setTimeout(() => {
-                refreshDrafts();
-                console.log('🔄 Refreshing AI drafts...');
-              }, 2000);
-            } else {
-              console.log('📧 No unread emails found');
             }
-          } else {
-            const errorText = await unreadEmailsRes.text();
-            console.error('❌ Gmail API failed:', errorText);
           }
         }
       } catch (error) {
-        console.error('Failed to fetch unread emails and generate drafts:', error);
+        console.error('Error fetching unread emails and generating drafts:', error);
       }
     };
     
-    console.log('🎯 Calling fetchUnreadEmailsAndGenerateDrafts...');
     fetchUnreadEmailsAndGenerateDrafts();
-    console.log('✅ fetchUnreadEmailsAndGenerateDrafts called');
-  }, [authReady]);
+  }, [authReady, isGmailConnected]);
 
   useEffect(() => {
     console.log('📊 Main dashboard useEffect triggered, authReady:', authReady);
@@ -1379,7 +1343,8 @@ export default function DashboardClient() {
               }
               loading={loadingSummary}
               gradientClass="bg-gradient-to-b from-cyan-800 to-fuchsia-800"
-              isGmailConnected={isGmailConnected}
+              isMailboxAvailable={isGmailConnected || hasImap}
+              onRefresh={refreshSummary}
             />
           </div>
           {/* Upcoming To-Dos Card */}
@@ -1387,14 +1352,8 @@ export default function DashboardClient() {
             <ExpandableCard
               expanded={expandedCard === 'todos'}
               onClick={() => handleCardToggle('todos')}
-              title={
-                <>
-                  Upcoming To-Dos
-                  <div className="text-blue-200 text-xs font-normal mt-1">Stay on top of your most important tasks and deadlines. Here you&apos;ll find your next actionable items, meetings, and project reminders.</div>
-                </>
-              }
-              icon={<ClipboardDocumentCheckIcon className="h-8 w-8 mr-2 text-green-200 drop-shadow-lg" />}
-              onRefresh={refreshTodos}
+              title="Upcoming To-Dos"
+              icon={<CheckCircleIcon className="h-6 w-6 text-blue-300" />}
               summary={
                 loadingTodos ? (
                   <div className="space-y-2 w-full">
@@ -1414,31 +1373,15 @@ export default function DashboardClient() {
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-semibold text-green-200 flex-1 truncate">{todo.task}</span>
                           {todo.type === 'calendar' && (
-                            <span className="text-xs text-blue-400 bg-blue-900/40 px-1 py-0.5 rounded">
-                              📅
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.8 && (
-                            <span className="text-xs text-red-400 bg-red-900/40 px-1 py-0.5 rounded">
-                              ⚡
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.6 && (todo.confidence || 0) <= 0.8 && (
-                            <span className="text-xs text-yellow-400 bg-yellow-900/40 px-1 py-0.5 rounded">
-                              ⏰
-                            </span>
+                            <span className="text-xs text-blue-400 bg-blue-900/40 px-1 py-0.5 rounded">📅</span>
                           )}
                         </div>
                         <div className="flex flex-wrap gap-1 mt-1 text-xs">
                           {todo.dueDate && (
-                            <span className="text-yellow-300 bg-yellow-900/20 px-1 py-0.5 rounded">
-                              {new Date(todo.dueDate).toLocaleDateString()}
-                            </span>
+                            <span className="text-yellow-300 bg-yellow-900/20 px-1 py-0.5 rounded">{new Date(todo.dueDate).toLocaleDateString()}</span>
                           )}
                           {todo.type === 'project' && todo.projectName && (
-                            <span className="text-blue-300 bg-blue-900/20 px-1 py-0.5 rounded truncate">
-                              {todo.projectName}
-                            </span>
+                            <span className="text-blue-300 bg-blue-900/20 px-1 py-0.5 rounded truncate">{todo.projectName}</span>
                           )}
                         </div>
                       </li>
@@ -1450,7 +1393,6 @@ export default function DashboardClient() {
               content={
                 loadingTodos ? (
                   <div className="space-y-3 w-full">
-                    {/* Skeleton todo items */}
                     {[1, 2, 3].map((i) => (
                       <div key={i} className="bg-white/10 rounded-lg p-3 border-l-4 border-green-400">
                         <div className="flex items-start justify-between gap-2 mb-2">
@@ -1476,37 +1418,16 @@ export default function DashboardClient() {
                       }`}>
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-semibold text-green-200 flex-1">{todo.task}</span>
-                          {todo.type === 'calendar' && (
-                            <span className="text-xs text-blue-400 bg-blue-900/40 px-2 py-1 rounded">
-                              📅 Calendar
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.8 && (
-                            <span className="text-xs text-red-400 bg-red-900/40 px-2 py-1 rounded">
-                              ⚡ Urgent
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.6 && (todo.confidence || 0) <= 0.8 && (
-                            <span className="text-xs text-yellow-400 bg-yellow-900/40 px-2 py-1 rounded">
-                              ⏰ Due Soon
-                            </span>
-                          )}
                         </div>
                         <div className="flex flex-wrap gap-2 mt-2 text-xs">
                           {todo.dueDate && (
-                            <span className="text-yellow-300 bg-yellow-900/20 px-2 py-1 rounded">
-                              📅 {new Date(todo.dueDate).toLocaleDateString()}
-                            </span>
+                            <span className="text-yellow-300 bg-yellow-900/20 px-2 py-1 rounded">📅 {new Date(todo.dueDate).toLocaleDateString()}</span>
                           )}
                           {todo.type === 'project' && todo.projectName && (
-                            <span className="text-blue-300 bg-blue-900/20 px-2 py-1 rounded">
-                              📁 {todo.projectName}
-                            </span>
+                            <span className="text-blue-300 bg-blue-900/20 px-2 py-1 rounded">📁 {todo.projectName}</span>
                           )}
                           {todo.type === 'project' && typeof todo.confidence === 'number' && !isNaN(todo.confidence) && (
-                            <span className="text-green-400 bg-green-900/20 px-2 py-1 rounded">
-                              🎯 {(todo.confidence * 100).toFixed(0)}% priority
-                            </span>
+                            <span className="text-green-400 bg-green-900/20 px-2 py-1 rounded">🎯 {(todo.confidence * 100).toFixed(0)}% priority</span>
                           )}
                         </div>
                       </li>
@@ -1515,8 +1436,9 @@ export default function DashboardClient() {
                 )
               }
               loading={loadingTodos}
-              gradientClass=""
-              isGmailConnected={isGmailConnected}
+              gradientClass="from-green-800/40 to-green-900/20"
+              isMailboxAvailable={isGmailConnected || hasImap}
+              onRefresh={refreshTodos}
             />
           </div>
           {/* AI Drafts Card */}
@@ -1524,14 +1446,8 @@ export default function DashboardClient() {
             <ExpandableCard
               expanded={expandedCard === 'drafts'}
               onClick={() => handleCardToggle('drafts')}
-              title={
-                <>
-                  AI Drafts
-                  <div className="text-blue-200 text-xs font-normal mt-1">I saw some emails in your inbox from your client. I&apos;m ready with the replies.</div>
-                </>
-              }
+              title="AI Drafts"
               icon={<EnvelopeOpenIcon className="h-8 w-8 mr-2 text-blue-200 drop-shadow-lg" />}
-              onRefresh={refreshDrafts}
               summary={
                 loadingDrafts ? (
                   <div className="space-y-2 w-full">
@@ -1539,27 +1455,19 @@ export default function DashboardClient() {
                     <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '55%' }}></div>
                   </div>
                 ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
-                  <div className="text-blue-200 text-sm">
-                    <div>No AI drafts ready for review.</div>
-                  </div>
+                  <div className="text-blue-200 text-sm">No AI drafts ready for review.</div>
                 ) : (
-                  <div className="text-blue-200 text-sm">
-                    {aiDraftsData.drafts?.length || 0} AI draft{(aiDraftsData.drafts?.length || 0) !== 1 ? 's' : ''} ready for review
-                  </div>
+                  <div className="text-blue-200 text-sm">{aiDraftsData.drafts?.length || 0} AI draft{(aiDraftsData.drafts?.length || 0) !== 1 ? 's' : ''} ready for review</div>
                 )
               }
               content={
                 loadingDrafts ? (
                   <div className="space-y-3 w-full">
-                    {/* Skeleton email items */}
                     {[1, 2].map((i) => (
                       <div key={i} className="bg-white/10 rounded-lg p-4 border border-blue-200/10">
                         <div className="flex items-start justify-between gap-3 mb-3">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '60%' }}></div>
-                              <div className="h-4 w-16 bg-blue-900/40 rounded animate-pulse"></div>
-                            </div>
+                            <div className="h-4 bg-blue-900/40 rounded animate-pulse mb-2" style={{ width: '60%' }}></div>
                             <div className="h-3 bg-blue-900/40 rounded animate-pulse mb-2" style={{ width: '90%' }}></div>
                             <div className="h-3 bg-blue-900/40 rounded animate-pulse" style={{ width: '70%' }}></div>
                           </div>
@@ -1572,9 +1480,7 @@ export default function DashboardClient() {
                     ))}
                   </div>
                 ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
-                  <div className="text-blue-200 text-base">
-                    <div className="mb-4">No AI drafts ready for review.</div>
-                  </div>
+                  <div className="text-blue-200 text-base">No AI drafts ready for review.</div>
                 ) : (
                   <ul className="space-y-3 w-full max-h-60 overflow-y-auto">
                     {aiDraftsData.drafts?.map((draft: DashboardEmail) => (
@@ -1583,72 +1489,18 @@ export default function DashboardClient() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
                               <span className="font-semibold text-blue-100 truncate">{draft.subject || 'AI Draft'}</span>
-                              <span className="px-2 py-0.5 text-xs rounded bg-blue-700/60 text-blue-200 font-semibold">
-                                {draft.projectName || 'Client'}
-                              </span>
                             </div>
-                            
-                            {/* Clickable preview - shows first 100 chars */}
-                            <div 
-                              className="text-sm text-blue-200 mb-3 cursor-pointer hover:text-blue-100 transition-colors"
-                              onClick={() => {
-                                // Show full content in modal
-                                openDraftModal(draft);
-                              }}
-                            >
-                              {draft.body && draft.body.length > 100 
-                                ? `${draft.body.substring(0, 100)}...` 
-                                : draft.body || 'AI generated draft content'
-                              }
+                            <div className="text-sm text-blue-200 mb-3 cursor-pointer hover:text-blue-100 transition-colors" onClick={() => openDraftModal(draft)}>
+                              {draft.body && draft.body.length > 100 ? `${draft.body.substring(0, 100)}...` : draft.body || 'AI generated draft content'}
                               <span className="text-blue-400 text-xs ml-2">(Click to view full)</span>
                             </div>
-                            
                             <div className="flex items-center gap-2 text-xs text-blue-300">
                               <span>To: {draft.projectName || 'Client'}</span>
                               <span>•</span>
                               <span>Status: {draft.status}</span>
                               <span>•</span>
-                              <span>
-                                {getDateFromEmail(draft.createdAt).toLocaleDateString()}
-                              </span>
+                              <span>{getDateFromEmail(draft.createdAt).toLocaleDateString()}</span>
                             </div>
-                          </div>
-                          
-                          <div className="flex flex-col gap-2 min-w-[120px] items-end">
-                            {draft.status === 'draft' && (
-                              <>
-                                <button
-                                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg font-semibold text-xs shadow-sm transition-all"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    await handleApproveDraft(draft);
-                                    // incrementMinutesSaved is already called in handleApproveDraft
-                                  }}
-                                >
-                                  Approve & Send
-                                </button>
-                                <button
-                                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg font-semibold text-xs shadow-sm transition-all"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    // TODO: Implement decline functionality
-                                    console.log('Decline draft:', draft.id);
-                                  }}
-                                >
-                                  Decline
-                                </button>
-                              </>
-                            )}
-                            {draft.status === 'approved' && (
-                              <span className="text-green-400 text-xs font-semibold px-2 py-1 bg-green-900/40 rounded">
-                                Sent ✓
-                              </span>
-                            )}
-                            {draft.status === 'declined' && (
-                              <span className="text-red-400 text-xs font-semibold px-2 py-1 bg-red-900/40 rounded">
-                                Declined ✗
-                              </span>
-                            )}
                           </div>
                         </div>
                       </li>
@@ -1657,8 +1509,9 @@ export default function DashboardClient() {
                 )
               }
               loading={loadingDrafts}
-              gradientClass=""
-              isGmailConnected={isGmailConnected}
+              gradientClass="from-purple-800/40 to-purple-900/20"
+              isMailboxAvailable={isGmailConnected || hasImap}
+              onRefresh={refreshDrafts}
             />
           </div>
         </div>

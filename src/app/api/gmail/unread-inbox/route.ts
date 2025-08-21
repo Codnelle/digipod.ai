@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
   if (!user.gmailToken) {
-    return NextResponse.json({ error: 'Gmail not connected for this user' }, { status: 400 });
+    // Return empty list to avoid error noise when Gmail is not connected
+    return NextResponse.json([]);
   }
   try {
     const emails = await fetchUnreadEmails(userId);

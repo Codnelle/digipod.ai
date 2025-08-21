@@ -30,7 +30,14 @@ export async function testImapSmtp({
     await imapClient.connect();
     await imapClient.logout();
   } catch (e) {
-    throw new Error('IMAP connection failed: ' + (e as Error).message);
+    const err = e as { message?: string; code?: string; command?: string; response?: unknown; source?: string };
+    const details = [
+      err?.code ? `code=${err.code}` : '',
+      err?.command ? `command=${err.command}` : '',
+      err?.response ? `response=${String(err.response)}` : '',
+      err?.source ? `source=${err.source}` : '',
+    ].filter(Boolean).join(' ');
+    throw new Error('IMAP connection failed: ' + (err?.message || String(err)) + (details ? ` (${details})` : ''));
   }
   // Test SMTP
   const transporter = nodemailer.createTransport({
@@ -42,7 +49,12 @@ export async function testImapSmtp({
   try {
     await transporter.verify();
   } catch (e) {
-    throw new Error('SMTP connection failed: ' + (e as Error).message);
+    const err = e as { message?: string; code?: string; response?: unknown };
+    const details = [
+      err?.code ? `code=${err.code}` : '',
+      err?.response ? `response=${String(err.response)}` : '',
+    ].filter(Boolean).join(' ');
+    throw new Error('SMTP connection failed: ' + (err?.message || String(err)) + (details ? ` (${details})` : ''));
   }
   return true;
 }
