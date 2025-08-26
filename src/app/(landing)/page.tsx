@@ -115,20 +115,18 @@ export default function LandingPage() {
         {/* Optionally, remove or darken decorative overlays for a pure midnight look */}
         <div className="relative z-20 flex flex-col items-center justify-center w-full">
           <h2 className="text-lg font-semibold mb-4 text-[#FFD600] tracking-widest uppercase drop-shadow">Your Anti-Productivity Tool</h2>
-          <h1 className="boldonse text-5xl md:text-7xl mb-6 leading-tight bg-gradient-to-r from-[#a18fff] via-[#6e3bbd] to-[#4b217a] bg-clip-text text-transparent animate-fade-in">AI-POWERED<br />BACK OFFICE</h1>
+          <h1 className="boldonse text-4xl md:text-6xl mb-6 leading-tight bg-gradient-to-r from-[#a18fff] via-[#6e3bbd] to-[#4b217a] bg-clip-text text-transparent animate-fade-in">THE FIRST COMPLETE<br />AI BACK-OFFICE FOR AGENCIES</h1>
           <p className="max-w-2xl mx-auto text-lg text-[#e0d6ff] mb-10 animate-fade-in delay-100">
             Digipod is the first anti productivity tool for creatives.<br />We don&apos;t help hustle - we help you stop. Automate emails, invoices, updates, client chaos so you can finally get back to your craft.
           </p>
           <div className="flex flex-wrap gap-4 justify-center animate-fade-in delay-200">
             <a href="https://forms.gle/2j3DcMv9HyxzeDqi8" target="_blank" rel="noopener noreferrer" className="bg-white text-[#1a1333] font-bold rounded-full px-8 py-3 shadow-lg hover:bg-gray-200 transition-transform transform hover:scale-105 focus:ring-2 focus:ring-[#a18fff] border border-[#a18fff]">Join Waitlist →</a>
-            <button
-              type="button"
-              onClick={handleRazorpay}
-              disabled={!razorpayLoaded || isRedirecting}
-              className="bg-[#FFD600] text-[#1a1333] font-bold rounded-full px-8 py-3 shadow-lg hover:bg-yellow-300 transition-transform transform hover:scale-105 focus:ring-2 focus:ring-[#FFD600] border border-[#FFD600] disabled:opacity-60 disabled:cursor-not-allowed"
+            <Link
+              href="/what-is-digipod"
+              className="bg-[#FFD600] text-[#1a1333] font-bold rounded-full px-8 py-3 shadow-lg hover:bg-yellow-300 transition-transform transform hover:scale-105 focus:ring-2 focus:ring-[#FFD600] border border-[#FFD600]"
             >
-              {razorpayLoaded ? (isRedirecting ? "Redirecting..." : "Unlock Founders Deal") : "Loading..."}
-            </button>
+              Unlock Founders Deal
+            </Link>
           </div>
           {isRedirecting && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
