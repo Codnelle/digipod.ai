@@ -115,7 +115,7 @@ export default function LandingPage() {
         {/* Optionally, remove or darken decorative overlays for a pure midnight look */}
         <div className="relative z-20 flex flex-col items-center justify-center w-full">
           <h2 className="text-lg font-semibold mb-4 text-[#FFD600] tracking-widest uppercase drop-shadow">Your Anti-Productivity Tool</h2>
-          <h1 className="boldonse text-4xl md:text-6xl mb-6 leading-tight bg-gradient-to-r from-[#a18fff] via-[#6e3bbd] to-[#4b217a] bg-clip-text text-transparent animate-fade-in">THE FIRST COMPLETE<br />AI BACK-OFFICE FOR AGENCIES</h1>
+          <h1 className="boldonse text-4xl md:text-6xl mb-6 leading-tight bg-gradient-to-r from-[#a18fff] via-[#6e3bbd] to-[#4b217a] bg-clip-text text-transparent animate-fade-in">The First AI-Native<br />back office for agencies</h1>
           <p className="max-w-2xl mx-auto text-lg text-[#e0d6ff] mb-10 animate-fade-in delay-100">
             Digipod is the first anti productivity tool for creatives.<br />We don&apos;t help hustle - we help you stop. Automate emails, invoices, updates, client chaos so you can finally get back to your craft.
           </p>
