@@ -65,13 +65,13 @@ export default function LandingPage() {
   return (
     <main className="min-h-screen w-full flex flex-col items-center text-white bg-gradient-to-b from-[#0a0820] via-[#14122b] to-[#1a1333]" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* Navbar */}
-      <nav className="w-full flex flex-col items-center py-3 px-2 bg-transparent sticky top-0 z-30">
-        <div className="flex w-full max-w-3xl items-center justify-between bg-black/90 rounded-2xl border border-[#666] px-5 py-2" style={{ boxShadow: '0 2px 16px 0 #0008' }}>
-          <div className="flex flex-col items-center">
+      <nav className="w-full flex flex-col items-center py-3 px-2 bg-transparent fixed top-0 z-30">
+        <div className="flex w-full max-w-3xl items-center justify-between bg-black/20 rounded-4xl border border-[#666] px-2.5 py-2" style={{ boxShadow: '0 2px 16px 0 #0008' }}>
+          <div className="flex flex-col ml-5 items-center">
             <Image src="/digipod.png" alt="Digipod Logo" height={36} width={120} style={{ height: 36, width: 'auto' }} />
           </div>
           <div className="flex gap-2">
-            <Link href="/signin" className="rounded-full px-5 py-2 bg-[#2d186a] text-white font-bold text-base shadow border border-[#3a1c8d] hover:bg-[#3a1c8d] transition-all" style={{ boxShadow: '0 2px 8px 0 #2d186a44' }}>Sign In</Link>
+            <Link href="/signin" className="rounded-full px-5 py-2 bg-[#2d186a] text-white font-bold text-base shadow border border-[#6c4ad6] hover:bg-[#3a1c8d] transition-all" style={{ boxShadow: '0 2px 8px 0 #2d186a44' }}>Sign In</Link>
             <Link href="/signup" className="rounded-full px-5 py-2 bg-[#6c4ad6] text-white font-bold text-base shadow border border-[#6c4ad6] hover:bg-[#8f5fff] transition-all" style={{ boxShadow: '0 2px 8px 0 #6c4ad644' }}>Sign Up</Link>
           </div>
         </div>
@@ -109,14 +109,14 @@ export default function LandingPage() {
       )}
 
       {/* Hero Section */}
-      <section className="relative w-full flex flex-col items-center justify-center text-center py-28 px-4 overflow-hidden" style={{ minHeight: '91.25vh' }}>
+      <section className="relative w-full flex flex-col items-center justify-center text-center py-28 px-4 overflow-hidden" style={{ minHeight: '100vh' }}>
         {/* 3JS Wave Background */}
         <div id="container" className="absolute inset-0 w-full h-full z-0" style={{ pointerEvents: 'none' }} />
         {/* Optionally, remove or darken decorative overlays for a pure midnight look */}
         <div className="relative z-20 flex flex-col items-center justify-center w-full">
           <h2 className="text-lg font-semibold mb-4 text-[#FFD600] tracking-widest uppercase drop-shadow">Your Anti-Productivity Tool</h2>
-          <h1 className="boldonse text-5xl md:text-7xl mb-6 leading-tight bg-gradient-to-r from-[#a18fff] via-[#6e3bbd] to-[#4b217a] bg-clip-text text-transparent animate-fade-in">AI-POWERED<br />BACK OFFICE</h1>
-          <p className="max-w-2xl mx-auto text-lg text-[#e0d6ff] mb-10 animate-fade-in delay-100">
+          <h1 className="boldonse text-5xl md:text-7xl mb-6 leading-tight bg-gradient-to-r from-[#a18fff] via-[#6e3bbd] to-[#ab72ff] bg-clip-text text-transparent animate-fade-in">AI-POWERED<br />BACK OFFICE</h1>
+          <p className="max-w-2xl saira-font mx-auto text-lg text-[#e0d6ff] mt-10 mb-10 animate-fade-in delay-100">
             Digipod is the first anti productivity tool for creatives.<br />We don&apos;t help hustle - we help you stop. Automate emails, invoices, updates, client chaos so you can finally get back to your craft.
           </p>
           <div className="flex flex-wrap gap-4 justify-center animate-fade-in delay-200">

@@ -1,3 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,100..900;1,100..900&display=swap');
+
+.saira-font {
+  font-family: "Saira", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  font-style: normal;
+}
+.dg {
+	display: none;
+}
 .outerdiv
 {
 	width: 100%;
@@ -9,6 +20,7 @@
 }
 .innerdiv
 {
+	
 	transform: scale(0.9);
 	margin: 1rem;
 	display: grid;
