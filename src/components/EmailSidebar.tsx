@@ -331,7 +331,7 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
       />
       
       {/* Main scrollable area: logo + nav + accounts */}
-      <div ref={sidebarScrollRef} className="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 gap-4" style={{ maxHeight: 'calc(100vh - 170px)' }}>
+      <div ref={sidebarScrollRef} className="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 gap-4" style={{ maxHeight: 'calc(100vh)' }}>
         {/* Collapse/Expand Button - vertically centered */}
         <button
           className="absolute top-1/2 right-[-18px] z-20 bg-gray-800 border border-gray-700 shadow-md rounded-full p-1 flex items-center justify-center transition hover:bg-gray-700"
@@ -343,7 +343,7 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
         </button>
         {/* Logo/Product */}
         <div className={`flex flex-col items-center justify-center w-full mb-2`} style={{ paddingLeft: collapsed ? 0 : 12 }}>
-          <Image src="/digilogo.png" alt="Digipod Logo" width={180} height={180} />
+          <Image src="/digilogo.png" alt="Digipod Logo" width={125} height={125} />
           <button
             className={`mt-2 ${collapsed ? 'w-8 h-8 p-0 rounded-full flex items-center justify-center' : 'w-32 px-2 py-1 rounded-md text-xs mx-auto'} bg-[#FFD600] text-[#1a1333] font-bold shadow hover:bg-yellow-300 transition border border-[#FFD600] focus:ring-2 focus:ring-[#FFD600]`}
             onClick={() => setShowPreorderModal(true)}
@@ -575,7 +575,7 @@ export default function EmailSidebar({ collapsed = false, setCollapsed }: EmailS
         document.body
       )}
       {/* Profile/Help Section - sticky at bottom */}
-      <div className={`sticky bottom-0 bg-gray-900 pt-6 border-t border-gray-800 flex flex-col gap-2 ${collapsed ? 'items-center' : ''}`} style={{ zIndex: 10 }}>
+      <div className={`sticky bottom-0 pb-6 bg-gray-900 pt-6 border-t border-gray-800 flex flex-col gap-2 ${collapsed ? 'items-center' : ''}`} style={{ zIndex: 10 }}>
         <div className="flex items-center gap-2 justify-center">
           {/* Avatar - match settings page exactly */}
           {currentUser?.photoURL ? (

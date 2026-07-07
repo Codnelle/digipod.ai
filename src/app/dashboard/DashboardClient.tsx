@@ -8,18 +8,16 @@ import AntiHustleMeter from '@/components/AntiHustleMeter';
 import useSWR from 'swr';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { CalendarDaysIcon, EnvelopeOpenIcon } from '@heroicons/react/24/solid';
-import './calendar-dashboard.css'; // Custom styles for react-big-calendar
 import { Calendar as BigCalendar, dateFnsLocalizer } from 'react-big-calendar';
-import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
-import { incrementMinutesSaved } from '../../lib/hustleMeter';
+import { incrementMinutesSaved } from '@/lib/hustleMeter';
 import { SparklesIcon } from '@heroicons/react/24/solid';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas-pro';
 
-console.log('Firebase config (dashboard):', auth.app.options);
+// console.log('Firebase config (dashboard):', auth.app.options);
 
 interface Project {
   id: string;
@@ -235,76 +233,93 @@ function ExpandableCard({ expanded, onClick, title, icon, summary, content, load
     <div
       tabIndex={0}
       role="button"
-      aria-label={`Expand ${title}`}
-      className={
-        `${gradientClass} rounded-2xl shadow-xl p-8 flex flex-col backdrop-blur-md card-bg items-start ${expanded ? 'h-auto min-h-0' : 'min-h-[180px] h-full'} border-1 relative transition-all duration-300 outline-none focus:ring-4 focus:ring-blue-400/50 hover:scale-[1.02] hover:shadow-2xl border-2 border-digi hover:border-blue-400 ${expanded ? 'ring-2 ring-blue-300/30 border-blue-400' : ''} ${loading ? 'animate-pulse' : ''}`
-      }
-      style={{ cursor: 'pointer' }}
+      aria-expanded={expanded}
+      aria-busy={loading}
+      className={[
+        gradientClass,
+        "group relative flex flex-col items-start w-full cursor-pointer select-none",
+        "rounded-2xl p-7 backdrop-blur-md card-bg",
+        "border border-white/10 shadow-xl",
+        expanded ? "h-auto min-h-0" : "min-h-[180px] h-full",
+        // scoped transitions only — no `transition-all`
+        "transition-[transform,box-shadow,border-color] duration-300 will-change-transform",
+        "hover:-translate-y-1 hover:border-[#6c4ad6]/60 hover:shadow-[0_12px_40px_rgba(108,74,214,0.25)]",
+        "motion-reduce:transform-none motion-reduce:transition-none",
+        "outline-none focus-visible:ring-2 focus-visible:ring-[#FFD600]/60",
+        expanded ? "border-[#6c4ad6]/60 ring-1 ring-[#6c4ad6]/30" : "",
+      ].join(" ")}
       onClick={onClick}
-      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && onClick()}
+      onKeyDown={e => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onClick())}
     >
-      {/* Loading overlay */}
-      {loading && (
-        <div className="absolute inset-0  bg-gradient-to-br from-blue-900/20 to-purple-900/20 backdrop-blur-sm rounded-2xl flex items-center justify-center z-10">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-blue-300 border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-blue-200 text-sm font-medium">Loading...</span>
-          </div>
-        </div>
-      )}
-      
-      <div className="flex w-full mb-4 select-none">
-        {icon}
-        <div className="flex w-full items-center">
-        <h2 className="text-2xl font-extrabold text-white ml-2 flex-1 drop-shadow-lg tracking-tight">{title}</h2>
-        <div className="flex items-center gap-2">
-          {onRefresh && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRefresh();
-              }}
-              className="p-1 rounded-full hover:bg-blue-600/30 transition-colors duration-200"
-              title="Refresh data"
-            >
-              <ArrowPathIcon className={`h-5 w-5 text-blue-200 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          )}
+      {/* Header */}
+      <div className="flex w-full items-center gap-2 mb-4">
+        <span className="shrink-0">{icon}</span>
+        <h2 className="text-xl font-extrabold text-white flex-1 tracking-tight truncate">{title}</h2>
+
+        {onRefresh && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+            className="p-1.5 rounded-full text-[#cfc9e8] hover:text-white hover:bg-white/10 transition-colors duration-200"
+            title="Refresh"
+            aria-label="Refresh data"
+          >
+            <ArrowPathIcon className={`h-5 w-5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        )}
+
         <ChevronDownIcon
-          className={`h-6 w-6 text-blue-100 ml-2 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
+          className={`h-6 w-6 text-[#a18fff] transition-transform duration-300 ${expanded ? "rotate-180" : ""}`}
         />
-        </div>
-        </div>
       </div>
+
+      {/* Body */}
       {!isGmailConnected ? (
-        <div className="w-full flex flex-col items-center justify-center">
-            <p className="text-white text-lg mb-4">Please connect your Gmail account to use this feature.</p>
+        <div className="w-full flex flex-col items-center justify-center py-6 text-center">
+          <p className="text-[#cfc9e8] text-base">Connect your Gmail account to use this feature.</p>
         </div>
       ) : loading ? (
-        <div className="w-full space-y-3">
-          {/* Skeleton loading for summary */}
+        // Skeletons only — no full-card pulse, no extra blurred overlay
+        <div className="w-full space-y-3" aria-hidden>
           <div className="space-y-2">
-            <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '80%' }}></div>
-            <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '60%' }}></div>
+            <div className="h-4 w-4/5 rounded bg-white/10 animate-pulse" />
+            <div className="h-4 w-3/5 rounded bg-white/10 animate-pulse" />
           </div>
-          {/* Skeleton loading for content */}
           <div className="space-y-3 mt-4">
-            <div className="h-6 bg-blue-900/40 rounded animate-pulse"></div>
-            <div className="h-6 bg-blue-900/40 rounded animate-pulse" style={{ width: '90%' }}></div>
-            <div className="h-6 bg-blue-900/40 rounded animate-pulse" style={{ width: '70%' }}></div>
+            <div className="h-6 w-full rounded bg-white/10 animate-pulse" />
+            <div className="h-6 w-11/12 rounded bg-white/10 animate-pulse" />
+            <div className="h-6 w-8/12 rounded bg-white/10 animate-pulse" />
           </div>
         </div>
       ) : (
         <>
           <div className="w-full">{summary}</div>
-          <div className={`w-full mt-2 ${expanded ? '' : 'max-h-[260px] overflow-y-auto'}`}>{content}</div>
+          <div className={`w-full mt-2 ${expanded ? "" : "max-h-[260px] overflow-y-auto"}`}>{content}</div>
         </>
       )}
     </div>
   );
 }
 
-
+function EmptyState({ icon, title, hint, action }: {
+  icon: React.ReactNode;
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="w-full min-h-[150px] flex flex-col items-center justify-center text-center gap-3 py-6 animate-fade-in">
+      <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/[0.03] text-[#a18fff]">
+        <div className="absolute inset-0 rounded-2xl bg-[#6c4ad6]/10 blur-md" aria-hidden />
+        <span className="relative">{icon}</span>
+      </div>
+      <div>
+        <p className="text-white font-semibold text-[15px]">{title}</p>
+        {hint && <p className="text-[#a18fff]/70 text-sm mt-1 max-w-[240px] mx-auto leading-snug">{hint}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
 const fetchTodosWithAuth = async (url: string) => {
   // Wait for Firebase Auth to be ready and user to be logged in
   if (!auth.currentUser) return [];
@@ -935,6 +950,16 @@ export default function DashboardClient() {
       </div>
     );
   }
+  <style jsx global>{`
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  .animate-float { animation: float 6s ease-in-out infinite; will-change: transform; }
+  .animate-float-slow { animation: float 9s ease-in-out infinite; will-change: transform; }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .animate-fade-in { animation: fade-in .5s cubic-bezier(0.22,1,0.36,1) both; }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-float, .animate-float-slow, .animate-fade-in, .animate-pulse, .animate-spin { animation: none !important; }
+  }
+`}</style>
 
   const locales = {
     'en-US': enUS,
@@ -1047,23 +1072,32 @@ const generatePdfFromHtml = async () => {
                       </li>
                     ))}
       </div>    
-    <main className="flex-1 flex flex-col min-h-screen bg-gradient-to-r from-gray-900 to-gray-900 relative overflow-x-hidden">
+    <main className="flex-1 flex flex-col min-h-screen bg-gradient-to-b from-[#0a0820] via-[#14122b] to-[#1a1333] relative overflow-x-hidden">
       {/* Animated shimmer overlay */}
-      <div className="pointer-events-none fixed inset-0 z-0 animate-shimmer bg-gradient-to-r from-transparent via-white/10" style={{ backgroundSize: '200% 100%' }} />
+      {/* Static ambient glow — GPU-composited, zero animation cost */}
+<div
+  aria-hidden
+  className="pointer-events-none fixed inset-0 z-0"
+  style={{
+    background:
+      'radial-gradient(60rem 40rem at 15% -10%, rgba(108,74,214,0.18), transparent 60%),' +
+      'radial-gradient(55rem 40rem at 100% 0%, rgba(255,214,0,0.06), transparent 55%)',
+  }}
+/>
       {/* Hero Header */}
-      <section className="w-full mb-12 relative z-10" style={{ background: 'linear-gradient(to right, #23243a, #23243a 60%, #23243a)' }}>
-        <div className="w-full px-20 py-4">
+      <section className="w-full mb-12 relative z-10" style={{  }}>
+        <div className="w-full max-w-7xl mx-auto px-6 md:px-10 py-6">
           <div className="flex flex-row items-center justify-between w-full gap-16">
             <div className="flex-1 text-left">
-              <h1 className="text-4xl font-extrabold tracking-tight mb-2 bg-clip-text text-[#6446d6] drop-shadow-lg">Dashboard</h1>
-              <p className="text-lg text-gray-300 font-medium">Welcome back, creative rebel. Your anti-hustle HQ awaits.</p>
+            {/* <h1 className="text-4xl font-extrabold tracking-tight mb-2 text-[#FFD600] drop-shadow-lg">Dashboard</h1> */}
+              <p className="text-lg text-gray-300 font-medium">Welcome back. Your anti-hustle HQ awaits.</p>
             </div>
-            <div className="flex-1 flex justify-center items-center">
+            {/* <div className="flex-1 flex justify-center items-center"> */}
               {/* Floating Pip Avatar */}
               {/* <div className="animate-float drop-shadow-xl">
                 <PipAvatar minutesSaved={minutesSaved} focusMode={focusMode} />
               </div> */}
-            </div>
+            {/* </div> */}
             <div className="flex-1 flex justify-end items-center gap-4">
               <AntiHustleMeter minutesSaved={minutesSaved} />
               {/* Calendar Icon */}
@@ -1081,10 +1115,10 @@ const generatePdfFromHtml = async () => {
                 </div>
                 {/* Notification Badge */}
                 {newEventsCount > 0 && (
-                  <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-semibold rounded-full min-w-[18px] h-[18px] flex items-center justify-center shadow-lg border-2 border-white">
-                    {newEventsCount > 99 ? '99+' : newEventsCount}
-                  </div>
-                )}
+  <div className="absolute -top-1 -right-1 bg-[#FFD600] text-[#1a1333] text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center shadow-lg">
+    {newEventsCount > 99 ? '99+' : newEventsCount}
+  </div>
+)}
               </div>
             </div>
           </div>
@@ -1108,393 +1142,293 @@ const generatePdfFromHtml = async () => {
       </div>
       {/* Toast notification */}
       {toast && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-[#6c4ad6] text-white px-6 py-3 rounded-full shadow-lg z-50 animate-fade-in border border-[#8f5fff]/50">
           {toast}
         </div>
       )}
       {/* AI-powered Overview Cards */}
       
       {/* Second row: To-Dos, Create Project, Drafted Replies */}
-      <div id="create-project-section" className="px-4 md:px-12">
-        <div className="flex flex-col md:flex-row items-stretch justify-center gap-8 mb-12">
-          {/* What's Changed Card - moved from top, with full breakdown */}
-          <div className={`flex-1 max-w-xl flex flex-col justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-b from-cyan-800 to-fuchsia-800 min-h-[220px] ${expandedCard === 'summary' ? 'h-auto' : 'h-[260px]'}`}>
-            <ExpandableCard
-              expanded={expandedCard === 'summary'}
-              onClick={() => handleCardToggle('summary')}
-              title="What's Changed"
-              icon={<SparklesIcon className="h-8 w-8 text-yellow-300" />}
-              onRefresh={refreshSummary}
-              summary={
-                loadingSummary ? (
-                  <div className="space-y-2 w-full">
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '90%' }}></div>
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '75%' }}></div>
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '60%' }}></div>
+      <div id="create-project-section" className="max-w-7xl mx-auto px-6 md:px-10">
+  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-12">
+
+    {/* What's Changed */}
+    <div className={`flex ${expandedCard === 'summary' ? 'h-auto' : 'h-[280px]'}`}>
+      <ExpandableCard
+        expanded={expandedCard === 'summary'}
+        onClick={() => handleCardToggle('summary')}
+        title="What's Changed"
+        icon={<SparklesIcon className="h-7 w-7 text-[#FFD600]" />}
+        onRefresh={refreshSummary}
+        summary={
+          loadingSummary ? (
+            <div className="space-y-2 w-full">
+              <div className="h-4 w-11/12 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-3/4 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-3/5 rounded bg-white/10 animate-pulse" />
+            </div>
+          ) : (!aiSummary && !(summaryData && 'summary' in summaryData)) ? (
+  <EmptyState
+    icon={<SparklesIcon className="h-6 w-6" />}
+    title="All caught up"
+    hint="No AI activity in the last 24 hours — Digipod will log changes here as they happen."
+  />
+) : (
+  <div className="text-[#cfc9e8] text-base mt-2"> ...existing breakdown... </div>
+)
+
+        }
+        content={
+          loadingSummary ? (
+            <div className="space-y-3 w-full">
+              <div className="h-4 w-full rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-11/12 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-4/5 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-7/12 rounded bg-white/10 animate-pulse" />
+            </div>
+          ) : (
+            <div className="text-[#cfc9e8] text-base mt-2">
+              <p className="mb-4 w-full">{aiSummary || 'No AI changes detected.'}</p>
+              {summaryData && typeof summaryData === 'object' && 'summary' in summaryData && (
+                <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-2">
+                  <h4 className="font-semibold text-white mb-3">AI Activity — Last 24h</h4>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-[#a18fff]">🚀 Phase Advances</span><span className="font-semibold text-[#6ee7b7]">{summaryData.summary?.phaseAdvances || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-[#a18fff]">📝 New Drafts</span><span className="font-semibold text-[#a18fff]">{summaryData.summary?.newDrafts || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-[#a18fff]">✅ New Todos</span><span className="font-semibold text-[#FFD600]">{summaryData.summary?.newTodos || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-[#a18fff]">📧 Processed</span><span className="font-semibold text-[#c9a5ff]">{summaryData.summary?.processedEmails || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-[#a18fff]">🤖 AI Actions</span><span className="font-semibold text-[#7dd3fc]">{summaryData.summary?.aiActivities || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-[#a18fff]">⚡ High Impact</span><span className="font-semibold text-[#ff9d9d]">{summaryData.summary?.highImpactChanges || 0}</span></div>
                   </div>
-                ) : (
-                  <p className="text-blue-100 text-base truncate w-full">{aiSummary || 'No AI changes detected.'}</p>
-                )
-              }
-              content={
-                loadingSummary ? (
-                  <div className="space-y-3 w-full">
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse"></div>
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '95%' }}></div>
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '80%' }}></div>
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '70%' }}></div>
+                  <div className="text-xs text-[#a18fff]/70 mt-3 pt-2 border-t border-white/10">
+                    Updated {summaryData?.lastUpdated ? new Date(summaryData.lastUpdated).toLocaleString() : 'Unknown'}
                   </div>
-                ) : (
-                  <div className="text-blue-100 text-base mt-2 ">
-                    <p className="mb-4 w-full">{aiSummary || 'No AI changes detected.'}</p>
-                    {summaryData && typeof summaryData === 'object' && 'summary' in summaryData && (
-                      <div className="bg-blue-900/20 rounded-lg p-4 space-y-2">
-                        <h4 className="font-semibold text-blue-200 mb-3">AI Activity Breakdown (Last 24h):</h4>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div className="flex justify-between">
-                            <span>🚀 Phase Advances:</span>
-                            <span className="font-semibold text-green-400">{summaryData.summary?.phaseAdvances || 0}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>📝 New AI Drafts:</span>
-                            <span className="font-semibold text-blue-400">{summaryData.summary?.newDrafts || 0}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>✅ New Todos:</span>
-                            <span className="font-semibold text-yellow-400">{summaryData.summary?.newTodos || 0}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>📧 Processed Emails:</span>
-                            <span className="font-semibold text-purple-400">{summaryData.summary?.processedEmails || 0}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>🤖 AI Activities:</span>
-                            <span className="font-semibold text-cyan-400">{summaryData.summary?.aiActivities || 0}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>⚡ High Impact:</span>
-                            <span className="font-semibold text-red-400">{summaryData.summary?.highImpactChanges || 0}</span>
-                          </div>
-                        </div>
-                        <div className="text-xs text-green-500 mt-3 pt-2 border-t border-green-200">
-                          Last updated: {summaryData?.lastUpdated ? new Date(summaryData.lastUpdated).toLocaleString() : 'Unknown'}
-                        </div>
+                </div>
+              )}
+            </div>
+          )
+        }
+        loading={loadingSummary}
+        gradientClass="bg-white/[0.03]"
+        isGmailConnected={isGmailConnected}
+      />
+    </div>
+
+    {/* Upcoming To-Dos */}
+    <div className={`flex ${expandedCard === 'todos' ? 'h-auto' : 'h-[280px]'}`}>
+      <ExpandableCard
+        expanded={expandedCard === 'todos'}
+        onClick={() => handleCardToggle('todos')}
+        title="Upcoming To-Dos"
+        icon={<ClipboardDocumentCheckIcon className="h-7 w-7 text-[#6ee7b7]" />}
+        onRefresh={refreshTodos}
+        summary={
+          loadingTodos ? (
+            <div className="space-y-2 w-full">
+              <div className="h-4 w-5/6 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-2/3 rounded bg-white/10 animate-pulse" />
+            </div>
+          ) : todos.length === 0 ? (
+            <div className="text-[#a18fff] text-sm">No actionable to-dos found.</div>
+          ) : (
+            <ul className="space-y-2 w-full max-h-16 overflow-hidden">
+              {todos.slice(0, 2).map((todo, i) => (
+                <li key={i} className={`bg-white/5 rounded-lg p-3 text-[#cfc9e8] flex flex-col border-l-2 ${
+                  todo.type === 'calendar' ? 'border-[#6c4ad6]' :
+                  (todo.confidence || 0) > 0.8 ? 'border-[#ff6b6b]' :
+                  (todo.confidence || 0) > 0.6 ? 'border-[#FFD600]' : 'border-[#6ee7b7]'
+                }`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold text-white flex-1 truncate">{todo.task}</span>
+                    {todo.type === 'calendar' && <span className="text-xs">📅</span>}
+                    {todo.type === 'project' && (todo.confidence || 0) > 0.8 && <span className="text-xs">⚡</span>}
+                    {todo.type === 'project' && (todo.confidence || 0) > 0.6 && (todo.confidence || 0) <= 0.8 && <span className="text-xs">⏰</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1 text-xs">
+                    {todo.dueDate && <span className="text-[#FFD600] bg-[#FFD600]/10 px-1.5 py-0.5 rounded">{new Date(todo.dueDate).toLocaleDateString()}</span>}
+                    {todo.type === 'project' && todo.projectName && <span className="text-[#a18fff] bg-white/5 px-1.5 py-0.5 rounded truncate">{todo.projectName}</span>}
+                  </div>
+                </li>
+              ))}
+              {todos.length > 2 && <li className="text-[#a18fff] text-sm">…and {todos.length - 2} more</li>}
+            </ul>
+          )
+        }
+        content={
+          loadingTodos ? (
+            <div className="space-y-3 w-full">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="bg-white/5 rounded-lg p-3 border-l-2 border-white/10">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="h-4 flex-1 rounded bg-white/10 animate-pulse" />
+                    <div className="h-4 w-8 rounded bg-white/10 animate-pulse" />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="h-3 w-16 rounded bg-white/10 animate-pulse" />
+                    <div className="h-3 w-20 rounded bg-white/10 animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : todos.length === 0 ? (
+            <div className="text-[#a18fff] text-base">No actionable to-dos found.</div>
+          ) : (
+            <ul className="space-y-2 w-full max-h-60 overflow-y-auto">
+              {todos.map((todo, i) => (
+                <li key={i} className={`bg-white/5 rounded-lg p-3 text-[#cfc9e8] flex flex-col border-l-2 ${
+                  todo.type === 'calendar' ? 'border-[#6c4ad6]' :
+                  (todo.confidence || 0) > 0.8 ? 'border-[#ff6b6b]' :
+                  (todo.confidence || 0) > 0.6 ? 'border-[#FFD600]' : 'border-[#6ee7b7]'
+                }`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold text-white flex-1">{todo.task}</span>
+                    {todo.type === 'calendar' && <span className="text-xs text-[#a18fff] bg-[#6c4ad6]/20 px-2 py-1 rounded">📅 Calendar</span>}
+                    {todo.type === 'project' && (todo.confidence || 0) > 0.8 && <span className="text-xs text-[#ff9d9d] bg-red-500/15 px-2 py-1 rounded">⚡ Urgent</span>}
+                    {todo.type === 'project' && (todo.confidence || 0) > 0.6 && (todo.confidence || 0) <= 0.8 && <span className="text-xs text-[#FFD600] bg-[#FFD600]/10 px-2 py-1 rounded">⏰ Due Soon</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2 text-xs">
+                    {todo.dueDate && <span className="text-[#FFD600] bg-[#FFD600]/10 px-2 py-1 rounded">📅 {new Date(todo.dueDate).toLocaleDateString()}</span>}
+                    {todo.type === 'project' && todo.projectName && <span className="text-[#a18fff] bg-white/5 px-2 py-1 rounded">📁 {todo.projectName}</span>}
+                    {todo.type === 'project' && typeof todo.confidence === 'number' && !isNaN(todo.confidence) && <span className="text-[#6ee7b7] bg-emerald-500/10 px-2 py-1 rounded">🎯 {(todo.confidence * 100).toFixed(0)}%</span>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+        loading={loadingTodos}
+        gradientClass="bg-white/[0.03]"
+        isGmailConnected={isGmailConnected}
+      />
+    </div>
+
+    {/* AI Drafts */}
+    <div className={`flex ${expandedCard === 'drafts' ? 'h-auto' : 'h-[280px]'}`}>
+      <ExpandableCard
+        expanded={expandedCard === 'drafts'}
+        onClick={() => handleCardToggle('drafts')}
+        title="AI Drafts"
+        icon={<EnvelopeOpenIcon className="h-7 w-7 text-[#a18fff]" />}
+        onRefresh={refreshDrafts}
+        summary={
+          loadingDrafts ? (
+            <div className="space-y-2 w-full">
+              <div className="h-4 w-3/4 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-1/2 rounded bg-white/10 animate-pulse" />
+            </div>
+          ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
+            <div className="text-[#a18fff] text-sm">No AI drafts ready for review.</div>
+          ) : (
+            <div className="text-[#cfc9e8] text-sm">
+              {aiDraftsData.drafts?.length || 0} AI draft{(aiDraftsData.drafts?.length || 0) !== 1 ? 's' : ''} ready for review
+            </div>
+          )
+        }
+        content={
+          loadingDrafts ? (
+            <div className="space-y-3 w-full">
+              {[1, 2].map((i) => (
+                <div key={i} className="bg-white/5 rounded-lg p-4 border border-white/10">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="h-4 w-3/5 rounded bg-white/10 animate-pulse" />
+                        <div className="h-4 w-16 rounded bg-white/10 animate-pulse" />
                       </div>
-                    )}
+                      <div className="h-3 w-11/12 rounded bg-white/10 animate-pulse mb-2" />
+                      <div className="h-3 w-7/12 rounded bg-white/10 animate-pulse" />
+                    </div>
+                    <div className="flex flex-col gap-2 min-w-[120px] items-end">
+                      <div className="h-8 w-20 rounded bg-white/10 animate-pulse" />
+                      <div className="h-8 w-16 rounded bg-white/10 animate-pulse" />
+                    </div>
                   </div>
-                )
-              }
-              loading={loadingSummary}
-              gradientClass="bg-gradient-to-b from-cyan-800 to-fuchsia-800"
-              isGmailConnected={isGmailConnected}
-            />
-          </div>
-          {/* Upcoming To-Dos Card */}
-          <div className={`flex-1 max-w-xl w-full min-w-[320px] flex flex-col justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-b from-cyan-800 to-fuchsia-800 min-h-[260px] ${expandedCard === 'todos' ? 'h-auto' : 'h-[260px]'}`}>
-            <ExpandableCard
-              expanded={expandedCard === 'todos'}
-              onClick={() => handleCardToggle('todos')}
-              title={
-                <>
-                  Upcoming To-Dos
-                  <div className="text-blue-200 text-xs font-normal mt-1">Stay on top of your most important tasks and deadlines. Here you&apos;ll find your next actionable items, meetings, and project reminders.</div>
-                </>
-              }
-              icon={<ClipboardDocumentCheckIcon className="h-8 w-8 mr-2 text-green-200 drop-shadow-lg" />}
-              onRefresh={refreshTodos}
-              summary={
-                loadingTodos ? (
-                  <div className="space-y-2 w-full">
-                    <div className="h-4 bg-green-900/40 rounded animate-pulse" style={{ width: '85%' }}></div>
-                    <div className="h-4 bg-green-900/40 rounded animate-pulse" style={{ width: '65%' }}></div>
-                  </div>
-                ) : todos.length === 0 ? (
-                  <div className="text-blue-200 text-sm">No actionable to-dos found.</div>
-                ) : (
-                  <ul className="space-y-2 w-full max-h-16 overflow-hidden">
-                    {todos.slice(0, 2).map((todo, i) => (
-                      <li key={i} className={`bg-white/10 rounded-lg p-3 text-blue-100 shadow flex flex-col border-l-4 ${
-                        todo.type === 'calendar' ? 'border-blue-400' : 
-                        (todo.confidence || 0) > 0.8 ? 'border-red-400' :
-                        (todo.confidence || 0) > 0.6 ? 'border-yellow-400' : 'border-green-400'
-                      }`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-semibold text-green-200 flex-1 truncate">{todo.task}</span>
-                          {todo.type === 'calendar' && (
-                            <span className="text-xs text-blue-400 bg-blue-900/40 px-1 py-0.5 rounded">
-                              📅
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.8 && (
-                            <span className="text-xs text-red-400 bg-red-900/40 px-1 py-0.5 rounded">
-                              ⚡
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.6 && (todo.confidence || 0) <= 0.8 && (
-                            <span className="text-xs text-yellow-400 bg-yellow-900/40 px-1 py-0.5 rounded">
-                              ⏰
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1 text-xs">
-                          {todo.dueDate && (
-                            <span className="text-yellow-300 bg-yellow-900/20 px-1 py-0.5 rounded">
-                              {new Date(todo.dueDate).toLocaleDateString()}
-                            </span>
-                          )}
-                          {todo.type === 'project' && todo.projectName && (
-                            <span className="text-blue-300 bg-blue-900/20 px-1 py-0.5 rounded truncate">
-                              {todo.projectName}
-                            </span>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                    {todos.length > 2 && <li className="text-blue-300">...and {todos.length - 2} more</li>}
-                  </ul>
-                )
-              }
-              content={
-                loadingTodos ? (
-                  <div className="space-y-3 w-full">
-                    {/* Skeleton todo items */}
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="bg-white/10 rounded-lg p-3 border-l-4 border-green-400">
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="h-4 bg-green-900/40 rounded animate-pulse flex-1"></div>
-                          <div className="h-4 w-8 bg-green-900/40 rounded animate-pulse"></div>
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="h-3 w-16 bg-green-900/40 rounded animate-pulse"></div>
-                          <div className="h-3 w-20 bg-green-900/40 rounded animate-pulse"></div>
-                        </div>
+                </div>
+              ))}
+            </div>
+          ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
+            <div className="text-[#cfc9e8] text-base">
+              <div className="mb-4">No AI drafts ready for review.</div>
+              <button
+                onClick={async () => {
+                  const user = auth.currentUser;
+                  if (!user) return;
+                  const token = await user.getIdToken();
+                  try {
+                    const res = await fetch('/api/email-monitor/status', { headers: { Authorization: `Bearer ${token}` } });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setToast(`Status: ${data.summary.emailSettingsCount} email settings, ${data.summary.clientFiltersCount} client filters, ${data.summary.processedEmailsCount} processed emails, ${data.summary.aiDraftsCount} AI drafts`);
+                    } else {
+                      setToast('Failed to get status');
+                    }
+                  } catch (err) {
+                    console.error('Failed to get status:', err);
+                    setToast('Error getting status');
+                  }
+                }}
+                className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-xs transition-colors"
+              >
+                Check Status
+              </button>
+            </div>
+          ) : (
+            <ul className="space-y-3 w-full max-h-60 overflow-y-auto">
+              {aiDraftsData.drafts?.map((draft: DashboardEmail) => (
+                <li key={draft.id} className="bg-white/5 rounded-lg p-4 border border-white/10 hover:border-[#6c4ad6]/40 transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-semibold text-white truncate">{draft.subject || 'AI Draft'}</span>
+                        <span className="px-2 py-0.5 text-xs rounded bg-[#6c4ad6]/30 text-[#c9a5ff] font-semibold shrink-0">{draft.projectName || 'Client'}</span>
                       </div>
-                    ))}
-                  </div>
-                ) : todos.length === 0 ? (
-                  <div className="text-blue-200 text-base">No actionable to-dos found.</div>
-                ) : (
-                  <ul className="space-y-2 w-full max-h-60 overflow-y-auto">
-                    {todos.map((todo, i) => (
-                      <li key={i} className={`bg-white/10 rounded-lg p-3 text-blue-100 shadow flex flex-col border-l-4 ${
-                        todo.type === 'calendar' ? 'border-blue-400' : 
-                        (todo.confidence || 0) > 0.8 ? 'border-red-400' :
-                        (todo.confidence || 0) > 0.6 ? 'border-yellow-400' : 'border-green-400'
-                      }`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-semibold text-green-200 flex-1">{todo.task}</span>
-                          {todo.type === 'calendar' && (
-                            <span className="text-xs text-blue-400 bg-blue-900/40 px-2 py-1 rounded">
-                              📅 Calendar
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.8 && (
-                            <span className="text-xs text-red-400 bg-red-900/40 px-2 py-1 rounded">
-                              ⚡ Urgent
-                            </span>
-                          )}
-                          {todo.type === 'project' && (todo.confidence || 0) > 0.6 && (todo.confidence || 0) <= 0.8 && (
-                            <span className="text-xs text-yellow-400 bg-yellow-900/40 px-2 py-1 rounded">
-                              ⏰ Due Soon
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2 mt-2 text-xs">
-                          {todo.dueDate && (
-                            <span className="text-yellow-300 bg-yellow-900/20 px-2 py-1 rounded">
-                              📅 {new Date(todo.dueDate).toLocaleDateString()}
-                            </span>
-                          )}
-                          {todo.type === 'project' && todo.projectName && (
-                            <span className="text-blue-300 bg-blue-900/20 px-2 py-1 rounded">
-                              📁 {todo.projectName}
-                            </span>
-                          )}
-                          {todo.type === 'project' && typeof todo.confidence === 'number' && !isNaN(todo.confidence) && (
-                            <span className="text-green-400 bg-green-900/20 px-2 py-1 rounded">
-                              🎯 {(todo.confidence * 100).toFixed(0)}% priority
-                            </span>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )
-              }
-              loading={loadingTodos}
-              gradientClass=""
-              isGmailConnected={isGmailConnected}
-            />
-          </div>
-          {/* AI Drafts Card */}
-          <div className={`flex-1 max-w-xl w-full min-w-[320px] flex flex-col justify-between rounded-2xl shadow-2xl p-0 border-2 border-blue-900/30 bg-gradient-to-b from-cyan-800 to-fuchsia-800 min-h-[260px] ${expandedCard === 'drafts' ? 'h-auto' : 'h-[260px]'}`}>
-            <ExpandableCard
-              expanded={expandedCard === 'drafts'}
-              onClick={() => handleCardToggle('drafts')}
-              title={
-                <>
-                  AI Drafts
-                  <div className="text-blue-200 text-xs font-normal mt-1">I saw some emails in your inbox from your client. I&apos;m ready with the replies.</div>
-                </>
-              }
-              icon={<EnvelopeOpenIcon className="h-8 w-8 mr-2 text-blue-200 drop-shadow-lg" />}
-              onRefresh={refreshDrafts}
-              summary={
-                loadingDrafts ? (
-                  <div className="space-y-2 w-full">
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '75%' }}></div>
-                    <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '55%' }}></div>
-                  </div>
-                ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
-                  <div className="text-blue-200 text-sm">No AI drafts ready for review.</div>
-                ) : (
-                  <div className="text-blue-200 text-sm">
-                    {aiDraftsData.drafts?.length || 0} AI draft{(aiDraftsData.drafts?.length || 0) !== 1 ? 's' : ''} ready for review
-                  </div>
-                )
-              }
-              content={
-                loadingDrafts ? (
-                  <div className="space-y-3 w-full">
-                    {/* Skeleton email items */}
-                    {[1, 2].map((i) => (
-                      <div key={i} className="bg-white/10 rounded-lg p-4 border border-blue-200/10">
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="h-4 bg-blue-900/40 rounded animate-pulse" style={{ width: '60%' }}></div>
-                              <div className="h-4 w-16 bg-blue-900/40 rounded animate-pulse"></div>
-                            </div>
-                            <div className="h-3 bg-blue-900/40 rounded animate-pulse mb-2" style={{ width: '90%' }}></div>
-                            <div className="h-3 bg-blue-900/40 rounded animate-pulse" style={{ width: '70%' }}></div>
-                          </div>
-                          <div className="flex flex-col gap-2 min-w-[120px] items-end">
-                            <div className="h-8 w-20 bg-blue-900/40 rounded animate-pulse"></div>
-                            <div className="h-8 w-16 bg-blue-900/40 rounded animate-pulse"></div>
-                          </div>
-                        </div>
+                      <div
+                        className="text-sm text-[#cfc9e8] mb-3 cursor-pointer hover:text-white transition-colors"
+                        onClick={() => openDraftModal(draft)}
+                      >
+                        {draft.body && draft.body.length > 100 ? `${draft.body.substring(0, 100)}...` : draft.body || 'AI generated draft content'}
+                        <span className="text-[#a18fff] text-xs ml-2">(view full)</span>
                       </div>
-                    ))}
+                      <div className="flex items-center gap-2 text-xs text-[#a18fff]">
+                        <span>To: {draft.projectName || 'Client'}</span><span>•</span>
+                        <span>{draft.status}</span><span>•</span>
+                        <span>{getDateFromEmail(draft.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 min-w-[120px] items-end">
+                      {draft.status === 'draft' && (
+                        <>
+                          <button
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg font-semibold text-xs transition-colors"
+                            onClick={async (e) => { e.stopPropagation(); await handleApproveDraft(draft); }}
+                          >
+                            Approve & Send
+                          </button>
+                          <button
+                            className="bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded-lg font-semibold text-xs transition-colors"
+                            onClick={async (e) => { e.stopPropagation(); console.log('Decline draft:', draft.id); }}
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
+                      {draft.status === 'approved' && <span className="text-[#6ee7b7] text-xs font-semibold px-2 py-1 bg-emerald-500/15 rounded">Sent ✓</span>}
+                      {draft.status === 'declined' && <span className="text-[#ff9d9d] text-xs font-semibold px-2 py-1 bg-red-500/15 rounded">Declined ✗</span>}
+                    </div>
                   </div>
-                ) : !aiDraftsData || aiDraftsData.drafts?.length === 0 ? (
-                  <div className="text-blue-200 text-base">
-                    <div className="mb-4">No AI drafts ready for review.</div>
-                    <button
-                      onClick={async () => {
-                        const user = auth.currentUser;
-                        if (!user) return;
-                        const token = await user.getIdToken();
-                        try {
-                          const res = await fetch('/api/email-monitor/status', {
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            console.log('Email monitoring status:', data);
-                            setToast(`Status: ${data.summary.emailSettingsCount} email settings, ${data.summary.clientFiltersCount} client filters, ${data.summary.processedEmailsCount} processed emails, ${data.summary.aiDraftsCount} AI drafts`);
-                          } else {
-                            setToast('Failed to get status');
-                          }
-                        } catch (err) {
-                          console.error('Failed to get status:', err);
-                          setToast('Error getting status');
-                        }
-                      }}
-                      className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs"
-                    >
-                      Check Status
-                    </button>
-                  </div>
-                ) : (
-                  <ul className="space-y-3 w-full max-h-60 overflow-y-auto">
-                    {aiDraftsData.drafts?.map((draft: DashboardEmail) => (
-                      <li key={draft.id} className="bg-white/10 rounded-lg p-4 border border-blue-200/10 hover:border-blue-300/20 transition-all">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="font-semibold text-blue-100 truncate">{draft.subject || 'AI Draft'}</span>
-                              <span className="px-2 py-0.5 text-xs rounded bg-blue-700/60 text-blue-200 font-semibold">
-                                {draft.projectName || 'Client'}
-                              </span>
-                            </div>
-                            
-                            {/* Clickable preview - shows first 100 chars */}
-                            <div 
-                              className="text-sm text-blue-200 mb-3 cursor-pointer hover:text-blue-100 transition-colors"
-                              onClick={() => {
-                                // Show full content in modal
-                                openDraftModal(draft);
-                              }}
-                            >
-                              {draft.body && draft.body.length > 100 
-                                ? `${draft.body.substring(0, 100)}...` 
-                                : draft.body || 'AI generated draft content'
-                              }
-                              <span className="text-blue-400 text-xs ml-2">(Click to view full)</span>
-                            </div>
-                            
-                            <div className="flex items-center gap-2 text-xs text-blue-300">
-                              <span>To: {draft.projectName || 'Client'}</span>
-                              <span>•</span>
-                              <span>Status: {draft.status}</span>
-                              <span>•</span>
-                              <span>
-                                {getDateFromEmail(draft.createdAt).toLocaleDateString()}
-                              </span>
-                            </div>
-                          </div>
-                          
-                          <div className="flex flex-col gap-2 min-w-[120px] items-end">
-                            {draft.status === 'draft' && (
-                              <>
-                                <button
-                                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg font-semibold text-xs shadow-sm transition-all"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    await handleApproveDraft(draft);
-                                    // incrementMinutesSaved is already called in handleApproveDraft
-                                  }}
-                                >
-                                  Approve & Send
-                                </button>
-                                <button
-                                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg font-semibold text-xs shadow-sm transition-all"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    // TODO: Implement decline functionality
-                                    console.log('Decline draft:', draft.id);
-                                  }}
-                                >
-                                  Decline
-                                </button>
-                              </>
-                            )}
-                            {draft.status === 'approved' && (
-                              <span className="text-green-400 text-xs font-semibold px-2 py-1 bg-green-900/40 rounded">
-                                Sent ✓
-                              </span>
-                            )}
-                            {draft.status === 'declined' && (
-                              <span className="text-red-400 text-xs font-semibold px-2 py-1 bg-red-900/40 rounded">
-                                Declined ✗
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )
-              }
-              loading={loadingDrafts}
-              gradientClass=""
-              isGmailConnected={isGmailConnected}
-            />
-          </div>
-        </div>
-        {/* Create New Project Widget */}
-        
-      </div>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+        loading={loadingDrafts}
+        gradientClass="bg-white/[0.03]"
+        isGmailConnected={isGmailConnected}
+      />
+    </div>
+
+  </div>
+</div>
       {/* Calendar Popup Modal */}
       {expandedCard === 'calendar' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

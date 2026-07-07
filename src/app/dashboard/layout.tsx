@@ -1,6 +1,6 @@
 "use client";
-import EmailSidebar from '../../components/EmailSidebar';
-import AuthenticatedCoPilot from '../../components/AuthenticatedCoPilot';
+import EmailSidebar from '@/components/EmailSidebar';
+import AuthenticatedCoPilot from '@/components/AuthenticatedCoPilot';
 import React, { useState } from 'react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
